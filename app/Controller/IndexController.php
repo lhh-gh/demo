@@ -24,4 +24,20 @@ class IndexController extends AbstractController
             'message' => "Hello {$user}.",
         ];
     }
+
+    public function get()
+    {
+        $user = $this->request->input('user', 'Hyperf');
+        $method = $this->request->getMethod();
+
+        return [
+            'method' => $method,
+            'message' => "Hello {$user}. 方法",
+        ];
+    }
+
+    public function post()
+    {
+        return 'post 方法';
+    }
 }
