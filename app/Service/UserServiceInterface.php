@@ -4,10 +4,19 @@ declare(strict_types=1);
 
 namespace App\Service;
 
-/**
- *  定义接口
- */
+use App\DTO\UserCreateDTO;
+use App\DTO\UserQueryDTO;
+use App\DTO\UserUpdateDTO;
+
 interface UserServiceInterface
 {
-    public function getUserInfo(int $id): array;
+    public function list(UserQueryDTO $dto): array;
+
+    public function show(int $id): ?array;
+
+    public function create(UserCreateDTO $dto): array;
+
+    public function update(int $id, UserUpdateDTO $dto): ?array;
+
+    public function delete(int $id): bool;
 }
