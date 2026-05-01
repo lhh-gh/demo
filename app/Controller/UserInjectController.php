@@ -9,18 +9,18 @@ use Hyperf\Di\Annotation\Inject;
 use Hyperf\HttpServer\Annotation\Controller;
 use Hyperf\HttpServer\Annotation\GetMapping;
 
-#[Controller(prefix: "user-inject")]
+#[Controller(prefix: 'user-inject')]
 class UserInjectController
 {
     #[Inject]
     protected UserServiceInterface $userService;
 
-    #[GetMapping("info/{id}")]
+    #[GetMapping('info/{id:\d+}')]
     public function info(int $id): array
     {
         return [
-            'method' => '#[Inject] with interface',
-            'data' => $this->userService->getUserInfo($id),
+            'inject_type' => 'attribute_inject',
+            'result' => $this->userService->getUserInfo($id),
         ];
     }
 }

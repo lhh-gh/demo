@@ -4,17 +4,32 @@ declare(strict_types=1);
 
 namespace App\Service;
 
-/**
- *  定义实现类
- */
+use App\Repository\UserRepositoryInterface;
+
 class UserService implements UserServiceInterface
 {
+    public function __construct(
+        protected UserRepositoryInterface $userRepository
+    )
+    {
+    }
+
     public function getUserInfo(int $id): array
     {
+        $user = $this->userRepository->findById($id);
+
+        if (!$user) {
+            return [
+                'code' => 404,
+                'message' => '用户不存在',
+                'data' => null,
+            ];
+        }
+
         return [
-            'id' => $id,
-            'name' => '李四',
-            'email' => 'lisi@example.com',
+            'code' => 0,
+            'message' => 'success',
+            'data' => $user,
         ];
     }
 }

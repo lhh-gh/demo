@@ -10,6 +10,7 @@ declare(strict_types=1);
  * @license  https://github.com/hyperf/hyperf/blob/master/LICENSE
  */
 return [
+    App\Repository\UserRepositoryInterface::class => App\Repository\UserRepository::class,
     App\Service\UserServiceInterface::class => App\Service\UserService::class,
 ];
 
