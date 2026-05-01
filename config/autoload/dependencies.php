@@ -10,4 +10,7 @@ declare(strict_types=1);
  * @license  https://github.com/hyperf/hyperf/blob/master/LICENSE
  */
 return [
+    App\Service\UserServiceInterface::class => App\Service\UserService::class,
 ];
+
+// 这样 Hyperf 容器在遇到 UserServiceInterface 时，就会自动实例化 UserService。

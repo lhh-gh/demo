@@ -4,14 +4,17 @@ declare(strict_types=1);
 
 namespace App\Service;
 
-class UserService
+/**
+ *  定义实现类
+ */
+class UserService implements UserServiceInterface
 {
     public function getUserInfo(int $id): array
     {
         return [
             'id' => $id,
-            'name' => '张三',
-            'email' => 'zhangsan@example.com',
+            'name' => '李四',
+            'email' => 'lisi@example.com',
         ];
     }
 }

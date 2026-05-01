@@ -86,3 +86,162 @@ return $a + $b;
 }
 echo add("5", "10"); // 直接抛出 Fatal error: Uncaught TypeError
 echo add(2.9, 3.1); // 同样抛出TypeError，不允许浮点数转整数
+
+
+———                                                                                                                   
+                                                                                                                        
+  # 1. 定义接口                                                                                                         
+                                                                                                                        
+  app/Service/UserServiceInterface.php                                                                                  
+                                                                                                                        
+  <?php                                                                                                                 
+                                                                                                                        
+  declare(strict_types=1);                                                                                              
+                                                                                                                        
+  namespace App\Service;                                                                                                
+                                                                                                                        
+  interface UserServiceInterface                                                                                        
+  {                                                                                                                     
+      public function getUserInfo(int $id): array;                                                                      
+  }                                                                                                                     
+                                                                                                                        
+  ———                                                                                                                   
+                                                                                                                        
+  # 2. 定义实现类                                                                                                       
+                                                                                                                        
+  app/Service/UserService.php                                                                                           
+                                                                                                                        
+  <?php                                                                                                                 
+                                                                                                                        
+  declare(strict_types=1);                                                                                              
+                                                                                                                        
+  namespace App\Service;                                                                                                
+                                                                                                                        
+  class UserService implements UserServiceInterface                                                                     
+  {                                                                                                                     
+      public function getUserInfo(int $id): array                                                                       
+      {                                                                                                                 
+          return [                                                                                                      
+              'id' => $id,                                                                                              
+              'name' => '李四',                                                                                         
+              'email' => 'lisi@example.com',                                                                            
+          ];                                                                                                            
+      }                                                                                                                 
+  }                                                                                                                     
+                                                                                                                        
+  ———                                                                                                                   
+                                                                                                                        
+  # 3. 配置依赖绑定                                                                                                     
+                                                                                                                        
+  config/autoload/dependencies.php                                                                                      
+                                                                                                                        
+  <?php                                                                                                                 
+                                                                                                                        
+  declare(strict_types=1);                                                                                              
+                                                                                                                        
+  return [                                                                                                              
+      App\Service\UserServiceInterface::class => App\Service\UserService::class,                                        
+  ];                                                                                                                    
+                                                                                                                        
+  > 这样 Hyperf 容器在遇到 UserServiceInterface 时，就会自动实例化 UserService。                                        
+                                                                                                                        
+  ———                                                                                                                   
+                                                                                                                        
+  # 4. 构造函数注入方式                                                                                                 
+                                                                                                                        
+  app/Controller/UserController.php                                                                                     
+                                                                                                                        
+  <?php                                                                                                                 
+                                                                                                                        
+  declare(strict_types=1);                                                                                              
+                                                                                                                        
+  namespace App\Controller;                                                                                             
+                                                                                                                        
+  use App\Service\UserServiceInterface;                                                                                 
+  use Hyperf\HttpServer\Annotation\Controller;                                                                          
+  use Hyperf\HttpServer\Annotation\GetMapping;                                                                          
+                                                                                                                        
+  #[Controller(prefix: "user")]                                                                                         
+  class UserController                                                                                                  
+  {                                                                                                                     
+      public function __construct(                                                                                      
+          protected UserServiceInterface $userService                                                                   
+      ) {                                                                                                               
+      }                                                                                                                 
+                                                                                                                        
+      #[GetMapping("info/{id}")]                                                                                        
+      public function info(int $id): array                                                                              
+      {                                                                                                                 
+          return [                                                                                                      
+              'method' => 'constructor inject with interface',                                                          
+              'data' => $this->userService->getUserInfo($id),                                                           
+          ];                                                                                                            
+      }                                                                                                                 
+  }                                                                                                                     
+                                                                                                                        
+  ———                                                                                                                   
+                                                                                                                        
+  # 5. #[Inject] 注解注入方式                                                                                           
+                                                                                                                        
+  app/Controller/UserInjectController.php                                                                               
+                                                                                                                        
+  <?php                                                                                                                 
+                                                                                                                        
+  declare(strict_types=1);                                                                                              
+                                                                                                                        
+  namespace App\Controller;                                                                                             
+                                                                                                                        
+  use App\Service\UserServiceInterface;                                                                                 
+  use Hyperf\Di\Annotation\Inject;                                                                                      
+  use Hyperf\HttpServer\Annotation\Controller;                                                                          
+  use Hyperf\HttpServer\Annotation\GetMapping;                                                                          
+                                                                                                                        
+  #[Controller(prefix: "user-inject")]                                                                                  
+  class UserInjectController                                                                                            
+  {                                                                                                                     
+      #[Inject]                                                                                                         
+      protected UserServiceInterface $userService;                                                                      
+                                                                                                                        
+      #[GetMapping("info/{id}")]                                                                                        
+      public function info(int $id): array                                                                              
+      {                                                                                                                 
+          return [                                                                                                      
+              'method' => '#[Inject] with interface',                                                                   
+              'data' => $this->userService->getUserInfo($id),                                                           
+          ];                                                                                                            
+      }                                                                                                                 
+  }                                                                                                                     
+                                                                                                                        
+  ———                                                                                                                   
+                                                                                                                        
+  # 6. 访问测试                                                                                                         
+                                                                                                                        
+  ## 构造函数注入                                                                                                       
+                                                                                                                        
+  GET /user/info/1                                                                                                      
+                                                                                                                        
+  返回：                                                                                                                
+                                                                                                                        
+  {                                                                                                                     
+    "method": "constructor inject with interface",                                                                      
+    "data": {                                                                                                           
+      "id": 1,                                                                                                          
+      "name": "李四",                                                                                                   
+      "email": "lisi@example.com"                                                                                       
+    }                                                                                                                   
+  }                                                                                                                     
+                                                                                                                        
+  ## #[Inject] 注入                                                                                                     
+                                                                                                                        
+  GET /user-inject/info/2                                                                                               
+                                                                                                                        
+  返回：                                                                                                                
+                                                                                                                        
+  {                                                                                                                     
+    "method": "#[Inject] with interface",                                                                               
+    "data": {                                                                                                           
+      "id": 2,                                                                                                          
+      "name": "李四",                                                                                                   
+      "email": "lisi@example.com"                                                                                       
+    }                                                                                                                   
+  }
