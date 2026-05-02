@@ -4433,3 +4433,395 @@ return [
   1. Hyperf 自定义注解 + AOP 完整 demo                                                                                  
   2. AOP 记录操作日志 demo                                                                                              
   3. AOP 做接口幂等校验 demo
+
+
+# 改造后的切面                                                                                                        
+                                                                                                                        
+  文件：app/Aspect/AopServiceAspect.php                                                                                 
+                                                                                                                        
+  <?php                                                                                                                 
+                                                                                                                        
+  declare(strict_types=1);                                                                                              
+                                                                                                                        
+  namespace App\Aspect;                                                                                                 
+                                                                                                                        
+  use App\Service\AopService;                                                                                           
+  use Hyperf\Di\Annotation\Aspect;                                                                                      
+  use Hyperf\Di\Aop\AbstractAspect;                                                                                     
+  use Hyperf\Di\Aop\ProceedingJoinPoint;                                                                                
+                                                                                                                        
+  #[Aspect]                                                                                                             
+  class AopServiceAspect extends AbstractAspect                                                                         
+  {                                                                                                                     
+      /**                                                                                                               
+       * 切点：                                                                                                         
+       * 只拦截 AopService::getUserInfo 方法                                                                            
+       */                                                                                                               
+      public array $classes = [                                                                                         
+          AopService::class . '::getUserInfo',                                                                          
+      ];                                                                                                                
+                                                                                                                        
+      public function process(ProceedingJoinPoint $proceedingJoinPoint)                                                 
+      {                                                                                                                 
+          // 1. 获取方法参数                                                                                            
+          $arguments = $proceedingJoinPoint->getArguments();                                                            
+                                                                                                                        
+          // 2. 记录开始时间                                                                                            
+          $startTime = microtime(true);                                                                                 
+                                                                                                                        
+          // 3. 前置日志                                                                                                
+          var_dump('AOP before');                                                                                       
+          var_dump('class:', $proceedingJoinPoint->className);                                                          
+          var_dump('method:', $proceedingJoinPoint->methodName);                                                        
+          var_dump('arguments:', $arguments);                                                                           
+                                                                                                                        
+          // 4. 执行原方法                                                                                              
+          $result = $proceedingJoinPoint->process();                                                                    
+                                                                                                                        
+          // 5. 统计耗时（毫秒）                                                                                        
+          $cost = round((microtime(true) - $startTime) * 1000, 2);                                                      
+                                                                                                                        
+          // 6. 后置日志                                                                                                
+          var_dump('AOP after');                                                                                        
+          var_dump('result before modify:', $result);                                                                   
+          var_dump('cost time:', $cost . ' ms');                                                                        
+                                                                                                                        
+          // 7. 改返回值                                                                                                
+          if (is_array($result)) {                                                                                      
+              $result['aop_log'] = 'this result was modified by AOP';                                                   
+              $result['aop_cost_ms'] = $cost;                                                                           
+          }                                                                                                             
+                                                                                                                        
+          // 8. 返回修改后的结果                                                                                        
+          return $result;                                                                                               
+      }                                                                                                                 
+  }                                                                                                                     
+                                                                                                                        
+  ———                                                                                                                   
+                                                                                                                        
+  # 如果原始 Service 是这样                                                                                             
+                                                                                                                        
+  文件：app/Service/AopService.php                                                                                      
+                                                                                                                        
+  <?php                                                                                                                 
+                                                                                                                        
+  declare(strict_types=1);                                                                                              
+                                                                                                                        
+  namespace App\Service;                                                                                                
+                                                                                                                        
+  class AopService                                                                                                      
+  {                                                                                                                     
+      public function getUserInfo(int $id): array                                                                       
+      {                                                                                                                 
+          return [                                                                                                      
+              'id' => $id,                                                                                              
+              'name' => '张三',                                                                                         
+          ];                                                                                                            
+      }                                                                                                                 
+  }                                                                                                                     
+                                                                                                                        
+  ———                                                                                                                   
+                                                                                                                        
+  # 调用后会发生什么                                                                                                    
+                                                                                                                        
+  假设你调用：                                                                                                          
+                                                                                                                        
+  $this->aopService->getUserInfo(1);                                                                                    
+                                                                                                                        
+  ———                                                                                                                   
+                                                                                                                        
+  ## 1）AOP 前置日志                                                                                                    
+                                                                                                                        
+  会输出：                                                                                                              
+                                                                                                                        
+  AOP before                                                                                                            
+  class: App\Service\AopService                                                                                         
+  method: getUserInfo                                                                                                   
+  arguments: [1]                                                                                                        
+                                                                                                                        
+  ———                                                                                                                   
+                                                                                                                        
+  ## 2）执行原方法                                                                                                      
+                                                                                                                        
+  原始返回：                                                                                                            
+                                                                                                                        
+  [                                                                                                                     
+      'id' => 1,                                                                                                        
+      'name' => '张三',                                                                                                 
+  ]                                                                                                                     
+                                                                                                                        
+  ———                                                                                                                   
+                                                                                                                        
+  ## 3）统计耗时                                                                                                        
+                                                                                                                        
+  例如：                                                                                                                
+                                                                                                                        
+  cost time: 1.25 ms                                                                                                    
+                                                                                                                        
+  ———                                                                                                                   
+                                                                                                                        
+  ## 4）改返回值后                                                                                                      
+                                                                                                                        
+  最终返回会变成：                                                                                                      
+                                                                                                                        
+  [                                                                                                                     
+      'id' => 1,                                                                                                        
+      'name' => '张三',                                                                                                 
+      'aop_log' => 'this result was modified by AOP',                                                                   
+      'aop_cost_ms' => 1.25,                                                                                            
+  ]                                                                                                                     
+                                                                                                                        
+  ———                                                                                                                   
+                                                                                                                        
+  # 这 3 个点你怎么理解                                                                                                 
+                                                                                                                        
+  ———                                                                                                                   
+                                                                                                                        
+  ## 一、打日志                                                                                                         
+                                                                                                                        
+  这里：                                                                                                                
+                                                                                                                        
+  var_dump('AOP before');                                                                                               
+  var_dump('class:', $proceedingJoinPoint->className);                                                                  
+  var_dump('method:', $proceedingJoinPoint->methodName);                                                                
+  var_dump('arguments:', $arguments);                                                                                   
+                                                                                                                        
+  就是在方法执行前记录日志。                                                                                            
+                                                                                                                        
+  真实项目里一般不是 var_dump，而是：                                                                                   
+                                                                                                                        
+  logger()->info(...)                                                                                                   
+                                                                                                                        
+  或者注入 LoggerInterface。                                                                                            
+                                                                                                                        
+  ———                                                                                                                   
+                                                                                                                        
+  ## 二、统计耗时                                                                                                       
+                                                                                                                        
+  这里：                                                                                                                
+                                                                                                                        
+  $startTime = microtime(true);                                                                                         
+  $result = $proceedingJoinPoint->process();                                                                            
+  $cost = round((microtime(true) - $startTime) * 1000, 2);                                                              
+                                                                                                                        
+  就是标准耗时统计写法。                                                                                                
+                                                                                                                        
+  常用于：                                                                                                              
+                                                                                                                        
+  - 监控慢方法                                                                                                          
+  - 记录 Service 性能                                                                                                   
+  - 埋点分析                                                                                                            
+                                                                                                                        
+  ———                                                                                                                   
+                                                                                                                        
+  ## 三、改返回值                                                                                                       
+                                                                                                                        
+  这里：                                                                                                                
+                                                                                                                        
+  if (is_array($result)) {                                                                                              
+      $result['aop_log'] = 'this result was modified by AOP';                                                           
+      $result['aop_cost_ms'] = $cost;                                                                                   
+  }                                                                                                                     
+                                                                                                                        
+  就是在原方法返回后，再统一增强返回结果。                                                                              
+                                                                                                                        
+  常用于：                                                                                                              
+                                                                                                                        
+  - 补公共字段                                                                                                          
+  - 增加 trace id                                                                                                       
+  - 包装统一响应结构                                                                                                    
+  - 调试时追加性能信息                                                                                                  
+                                                                                                                        
+  ———                                                                                                                   
+                                                                                                                        
+  # 更像真实项目的日志写法                                                                                              
+                                                                                                                        
+  如果你不想用 var_dump，可以这样：                                                                                     
+                                                                                                                        
+  <?php                                                                                                                 
+                                                                                                                        
+  declare(strict_types=1);                                                                                              
+                                                                                                                        
+  namespace App\Aspect;                                                                                                 
+                                                                                                                        
+  use App\Service\AopService;                                                                                           
+  use Hyperf\Di\Annotation\Aspect;                                                                                      
+  use Hyperf\Di\Aop\AbstractAspect;                                                                                     
+  use Hyperf\Di\Aop\ProceedingJoinPoint;                                                                                
+  use Psr\Log\LoggerInterface;                                                                                          
+                                                                                                                        
+  #[Aspect]                                                                                                             
+  class AopServiceAspect extends AbstractAspect                                                                         
+  {                                                                                                                     
+      public array $classes = [                                                                                         
+          AopService::class . '::getUserInfo',                                                                          
+      ];                                                                                                                
+                                                                                                                        
+      public function __construct(                                                                                      
+          protected LoggerInterface $logger                                                                             
+      ) {                                                                                                               
+      }                                                                                                                 
+                                                                                                                        
+      public function process(ProceedingJoinPoint $proceedingJoinPoint)                                                 
+      {                                                                                                                 
+          $arguments = $proceedingJoinPoint->getArguments();                                                            
+          $startTime = microtime(true);                                                                                 
+                                                                                                                        
+          $this->logger->info('AOP before', [                                                                           
+              'class' => $proceedingJoinPoint->className,                                                               
+              'method' => $proceedingJoinPoint->methodName,                                                             
+              'arguments' => $arguments,                                                                                
+          ]);                                                                                                           
+                                                                                                                        
+          $result = $proceedingJoinPoint->process();                                                                    
+                                                                                                                        
+          $cost = round((microtime(true) - $startTime) * 1000, 2);                                                      
+                                                                                                                        
+          $this->logger->info('AOP after', [                                                                            
+              'result' => $result,                                                                                      
+              'cost_ms' => $cost,                                                                                       
+          ]);                                                                                                           
+                                                                                                                        
+          if (is_array($result)) {                                                                                      
+              $result['aop_cost_ms'] = $cost;                                                                           
+          }                                                                                                             
+                                                                                                                        
+          return $result;                                                                                               
+      }                                                                                                                 
+  }                                                                                                                     
+                                                                                                                        
+  ———                                                                                                                   
+                                                                                                                        
+  # 一句话总结                                                                                                          
+                                                                                                                        
+  你这个 AOP 切面已经可以很自然地扩展成：                                                                               
+                                                                                                                        
+  - 前置日志                                                                                                            
+  - 耗时统计                                                                                                            
+  - 后置改返回值                                                                                                        
+                                                                                                                        
+  也就是最常见的 3 类 AOP 用法。
+
+
+<?php                                                                                                                 
+                                                                                                                        
+  declare(strict_types=1);                                                                                              
+                                                                                                                        
+  namespace App\Aspect;                                                                                                 
+                                                                                                                        
+  use App\Service\AopService;                                                                                           
+  use Hyperf\Di\Annotation\Aspect;                                                                                      
+  use Hyperf\Di\Aop\AbstractAspect;                                                                                     
+  use Hyperf\Di\Aop\ProceedingJoinPoint;                                                                                
+  use Psr\Log\LoggerInterface;                                                                                          
+                                                                                                                        
+  #[Aspect]                                                                                                             
+  class AopServiceAspect extends AbstractAspect                                                                         
+  {                                                                                                                     
+      /**                                                                                                               
+       * 定义切点                                                                                                       
+       *                                                                                                                
+       * 表示只拦截 AopService 类中的 getUserInfo 方法                                                                  
+       */                                                                                                               
+      public array $classes = [                                                                                         
+          AopService::class . '::getUserInfo',                                                                          
+      ];                                                                                                                
+                                                                                                                        
+      /**                                                                                                               
+       * 注入日志组件                                                                                                   
+       *                                                                                                                
+       * 这里使用 PSR 标准日志接口，方便记录 AOP 前后日志                                                               
+       */                                                                                                               
+      public function __construct(                                                                                      
+          protected LoggerInterface $logger                                                                             
+      ) {                                                                                                               
+      }                                                                                                                 
+                                                                                                                        
+      /**                                                                                                               
+       * AOP 核心处理方法                                                                                               
+       *                                                                                                                
+       * @param ProceedingJoinPoint $proceedingJoinPoint 当前连接点对象                                                 
+       *                                                                                                                
+       * 作用：                                                                                                         
+       * 1. 在目标方法执行前打印日志                                                                                    
+       * 2. 统计目标方法执行耗时                                                                                        
+       * 3. 在目标方法执行后打印日志                                                                                    
+       * 4. 对返回值进行增强                                                                                            
+       */                                                                                                               
+      public function process(ProceedingJoinPoint $proceedingJoinPoint)                                                 
+      {                                                                                                                 
+          /**                                                                                                           
+           * 获取目标方法接收到的参数                                                                                   
+           *                                                                                                            
+           * 例如调用 getUserInfo(1)，这里就能拿到参数 1                                                                
+           */                                                                                                           
+          $arguments = $proceedingJoinPoint->getArguments();                                                            
+                                                                                                                        
+          /**                                                                                                           
+           * 记录方法开始执行时间                                                                                       
+           *                                                                                                            
+           * microtime(true) 返回当前 Unix 时间戳（浮点型，精确到微秒）                                                 
+           */                                                                                                           
+          $startTime = microtime(true);                                                                                 
+                                                                                                                        
+          /**                                                                                                           
+           * 前置日志                                                                                                   
+           *                                                                                                            
+           * 记录：                                                                                                     
+           * - 当前执行的类名                                                                                           
+           * - 当前执行的方法名                                                                                         
+           * - 当前方法参数                                                                                             
+           */                                                                                                           
+          $this->logger->info('AOP before', [                                                                           
+              'class' => $proceedingJoinPoint->className,                                                               
+              'method' => $proceedingJoinPoint->methodName,                                                             
+              'arguments' => $arguments,                                                                                
+          ]);                                                                                                           
+                                                                                                                        
+          /**                                                                                                           
+           * 执行原始业务方法                                                                                           
+           *                                                                                                            
+           * 这一句非常关键：                                                                                           
+           * 如果不调用 process()，原方法就不会真正执行                                                                 
+           */                                                                                                           
+          $result = $proceedingJoinPoint->process();                                                                    
+                                                                                                                        
+          /**                                                                                                           
+           * 计算方法执行耗时                                                                                           
+           *                                                                                                            
+           * 单位转成毫秒，保留 2 位小数                                                                                
+           */                                                                                                           
+          $cost = round((microtime(true) - $startTime) * 1000, 2);                                                      
+                                                                                                                        
+          /**                                                                                                           
+           * 后置日志                                                                                                   
+           *                                                                                                            
+           * 记录：                                                                                                     
+           * - 原始返回结果                                                                                             
+           * - 方法执行耗时                                                                                             
+           */                                                                                                           
+          $this->logger->info('AOP after', [                                                                            
+              'result' => $result,                                                                                      
+              'cost_ms' => $cost,                                                                                       
+          ]);                                                                                                           
+                                                                                                                        
+          /**                                                                                                           
+           * 对返回结果进行增强                                                                                         
+           *                                                                                                            
+           * 如果原方法返回的是数组，                                                                                   
+           * 就在结果中额外追加一个 aop_cost_ms 字段                                                                    
+           */                                                                                                           
+          if (is_array($result)) {                                                                                      
+              $result['aop_cost_ms'] = $cost;                                                                           
+          }                                                                                                             
+                                                                                                                        
+          /**                                                                                                           
+           * 返回最终结果                                                                                               
+           *                                                                                                            
+           * 注意：                                                                                                     
+           * 这里返回的不是一定要原始结果，                                                                             
+           * 也可以返回你修改后的结果                                                                                   
+           */                                                                                                           
+          return $result;                                                                                               
+      }                                                                                                                 
+  }
