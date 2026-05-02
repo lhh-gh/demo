@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Controller;
 
 use App\Service\RedisLockService;
+use App\Annotation\Idempotent;
 use Hyperf\HttpServer\Annotation\Controller;
 use Hyperf\HttpServer\Annotation\PostMapping;
 
@@ -37,6 +38,19 @@ class OrderController
             'code' => 0,
             'message' => 'success',
             'data' => $result,
+        ];
+    }
+
+    #[Idempotent(prefix: 'order:test', ttl: 10)]
+    #[PostMapping('test')]
+    public function test(): array
+    {
+        return [
+            'code' => 0,
+            'message' => '下单成功',
+            'data' => [
+                'order_no' => 'ORD' . date('YmdHis'),
+            ],
         ];
     }
 }

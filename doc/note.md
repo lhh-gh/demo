@@ -4825,3 +4825,848 @@ return [
           return $result;                                                                                               
       }                                                                                                                 
   }
+
+
+1. AopService + HelloController 完整可运行 demo                                                                       
+  2. AOP 记录操作日志完整 demo                                                                                          
+  3. AOP 自定义注解 demo                                                                                                
+                                                                                                                        
+  ———                                                                                                                   
+                                                                                                                        
+  # 1）AopService + HelloController 完整可运行 demo                                                                     
+                                                                                                                        
+  ## app/Service/AopService.php                                                                                         
+                                                                                                                        
+  <?php                                                                                                                 
+                                                                                                                        
+  declare(strict_types=1);                                                                                              
+                                                                                                                        
+  namespace App\Service;                                                                                                
+                                                                                                                        
+  class AopService                                                                                                      
+  {                                                                                                                     
+      /**                                                                                                               
+       * 模拟获取用户信息                                                                                               
+       */                                                                                                               
+      public function getUserInfo(int $id): array                                                                       
+      {                                                                                                                 
+          return [                                                                                                      
+              'id' => $id,                                                                                              
+              'name' => '张三',                                                                                         
+              'email' => 'zhangsan@example.com',                                                                        
+          ];                                                                                                            
+      }                                                                                                                 
+  }                                                                                                                     
+                                                                                                                        
+  ———                                                                                                                   
+                                                                                                                        
+  ## app/Aspect/AopServiceAspect.php                                                                                    
+                                                                                                                        
+  <?php                                                                                                                 
+                                                                                                                        
+  declare(strict_types=1);                                                                                              
+                                                                                                                        
+  namespace App\Aspect;                                                                                                 
+                                                                                                                        
+  use App\Service\AopService;                                                                                           
+  use Hyperf\Di\Annotation\Aspect;                                                                                      
+  use Hyperf\Di\Aop\AbstractAspect;                                                                                     
+  use Hyperf\Di\Aop\ProceedingJoinPoint;                                                                                
+  use Psr\Log\LoggerInterface;                                                                                          
+                                                                                                                        
+  #[Aspect]                                                                                                             
+  class AopServiceAspect extends AbstractAspect                                                                         
+  {                                                                                                                     
+      /**                                                                                                               
+       * 切点：拦截 AopService::getUserInfo                                                                             
+       */                                                                                                               
+      public array $classes = [                                                                                         
+          AopService::class . '::getUserInfo',                                                                          
+      ];                                                                                                                
+                                                                                                                        
+      public function __construct(                                                                                      
+          protected LoggerInterface $logger                                                                             
+      ) {                                                                                                               
+      }                                                                                                                 
+                                                                                                                        
+      public function process(ProceedingJoinPoint $proceedingJoinPoint)                                                 
+      {                                                                                                                 
+          $arguments = $proceedingJoinPoint->getArguments();                                                            
+          $startTime = microtime(true);                                                                                 
+                                                                                                                        
+          // 前置日志                                                                                                   
+          $this->logger->info('AOP before', [                                                                           
+              'class' => $proceedingJoinPoint->className,                                                               
+              'method' => $proceedingJoinPoint->methodName,                                                             
+              'arguments' => $arguments,                                                                                
+          ]);                                                                                                           
+                                                                                                                        
+          // 执行原方法                                                                                                 
+          $result = $proceedingJoinPoint->process();                                                                    
+                                                                                                                        
+          // 统计耗时                                                                                                   
+          $cost = round((microtime(true) - $startTime) * 1000, 2);                                                      
+                                                                                                                        
+          // 后置日志                                                                                                   
+          $this->logger->info('AOP after', [                                                                            
+              'result' => $result,                                                                                      
+              'cost_ms' => $cost,                                                                                       
+          ]);                                                                                                           
+                                                                                                                        
+          // 修改返回值                                                                                                 
+          if (is_array($result)) {                                                                                      
+              $result['aop_cost_ms'] = $cost;                                                                           
+              $result['aop_message'] = 'this result was modified by AOP';                                               
+          }                                                                                                             
+                                                                                                                        
+          return $result;                                                                                               
+      }                                                                                                                 
+  }                                                                                                                     
+                                                                                                                        
+  ———                                                                                                                   
+                                                                                                                        
+  ## app/Controller/HelloController.php                                                                                 
+                                                                                                                        
+  <?php                                                                                                                 
+                                                                                                                        
+  declare(strict_types=1);                                                                                              
+                                                                                                                        
+  namespace App\Controller;                                                                                             
+                                                                                                                        
+  use App\Service\AopService;                                                                                           
+  use Hyperf\HttpServer\Annotation\Controller;                                                                          
+  use Hyperf\HttpServer\Annotation\GetMapping;                                                                          
+                                                                                                                        
+  #[Controller(prefix: 'hello')]                                                                                        
+  class HelloController                                                                                                 
+  {                                                                                                                     
+      public function __construct(                                                                                      
+          protected AopService $aopService                                                                              
+      ) {                                                                                                               
+      }                                                                                                                 
+                                                                                                                        
+      #[GetMapping('user')]                                                                                             
+      public function user(): array                                                                                     
+      {                                                                                                                 
+          return $this->aopService->getUserInfo(1);                                                                     
+      }                                                                                                                 
+  }                                                                                                                     
+                                                                                                                        
+  ———                                                                                                                   
+                                                                                                                        
+  ## 访问                                                                                                               
+                                                                                                                        
+  GET /hello/user                                                                                                       
+                                                                                                                        
+  返回示例：                                                                                                            
+                                                                                                                        
+  {                                                                                                                     
+    "id": 1,                                                                                                            
+    "name": "张三",                                                                                                     
+    "email": "zhangsan@example.com",                                                                                    
+    "aop_cost_ms": 0.31,                                                                                                
+    "aop_message": "this result was modified by AOP"                                                                    
+  }                                                                                                                     
+                                                                                                                        
+  ———                                                                                                                   
+                                                                                                                        
+  # 2）AOP 记录操作日志完整 demo                                                                                        
+                                                                                                                        
+  这个场景更像企业项目：                                                                                                
+  调用某个 Service 方法时，自动记录操作日志。                                                                           
+                                                                                                                        
+  ———                                                                                                                   
+                                                                                                                        
+  ## app/Service/OrderService.php                                                                                       
+                                                                                                                        
+  <?php                                                                                                                 
+                                                                                                                        
+  declare(strict_types=1);                                                                                              
+                                                                                                                        
+  namespace App\Service;                                                                                                
+                                                                                                                        
+  class OrderService                                                                                                    
+  {                                                                                                                     
+      public function createOrder(int $userId, string $productName): array                                              
+      {                                                                                                                 
+          return [                                                                                                      
+              'order_no' => 'ORD' . date('YmdHis'),                                                                     
+              'user_id' => $userId,                                                                                     
+              'product_name' => $productName,                                                                           
+              'status' => 'created',                                                                                    
+          ];                                                                                                            
+      }                                                                                                                 
+  }                                                                                                                     
+                                                                                                                        
+  ———                                                                                                                   
+                                                                                                                        
+  ## app/Aspect/OrderLogAspect.php                                                                                      
+                                                                                                                        
+  <?php                                                                                                                 
+                                                                                                                        
+  declare(strict_types=1);                                                                                              
+                                                                                                                        
+  namespace App\Aspect;                                                                                                 
+                                                                                                                        
+  use App\Service\OrderService;                                                                                         
+  use Hyperf\Di\Annotation\Aspect;                                                                                      
+  use Hyperf\Di\Aop\AbstractAspect;                                                                                     
+  use Hyperf\Di\Aop\ProceedingJoinPoint;                                                                                
+  use Psr\Log\LoggerInterface;                                                                                          
+  use Throwable;                                                                                                        
+                                                                                                                        
+  #[Aspect]                                                                                                             
+  class OrderLogAspect extends AbstractAspect                                                                           
+  {                                                                                                                     
+      /**                                                                                                               
+       * 拦截创建订单方法                                                                                               
+       */                                                                                                               
+      public array $classes = [                                                                                         
+          OrderService::class . '::createOrder',                                                                        
+      ];                                                                                                                
+                                                                                                                        
+      public function __construct(                                                                                      
+          protected LoggerInterface $logger                                                                             
+      ) {                                                                                                               
+      }                                                                                                                 
+                                                                                                                        
+      public function process(ProceedingJoinPoint $proceedingJoinPoint)                                                 
+      {                                                                                                                 
+          $arguments = $proceedingJoinPoint->getArguments();                                                            
+          $startTime = microtime(true);                                                                                 
+                                                                                                                        
+          $this->logger->info('操作开始', [                                                                             
+              'class' => $proceedingJoinPoint->className,                                                               
+              'method' => $proceedingJoinPoint->methodName,                                                             
+              'arguments' => $arguments,                                                                                
+          ]);                                                                                                           
+                                                                                                                        
+          try {                                                                                                         
+              $result = $proceedingJoinPoint->process();                                                                
+                                                                                                                        
+              $cost = round((microtime(true) - $startTime) * 1000, 2);                                                  
+                                                                                                                        
+              $this->logger->info('操作成功', [                                                                         
+                  'class' => $proceedingJoinPoint->className,                                                           
+                  'method' => $proceedingJoinPoint->methodName,                                                         
+                  'result' => $result,                                                                                  
+                  'cost_ms' => $cost,                                                                                   
+              ]);                                                                                                       
+                                                                                                                        
+              return $result;                                                                                           
+          } catch (Throwable $e) {                                                                                      
+              $cost = round((microtime(true) - $startTime) * 1000, 2);                                                  
+                                                                                                                        
+              $this->logger->error('操作失败', [                                                                        
+                  'class' => $proceedingJoinPoint->className,                                                           
+                  'method' => $proceedingJoinPoint->methodName,                                                         
+                  'error' => $e->getMessage(),                                                                          
+                  'cost_ms' => $cost,                                                                                   
+              ]);                                                                                                       
+                                                                                                                        
+              throw $e;                                                                                                 
+          }                                                                                                             
+      }                                                                                                                 
+  }                                                                                                                     
+                                                                                                                        
+  ———                                                                                                                   
+                                                                                                                        
+  ## app/Controller/HelloController.php 增加一个订单接口                                                                
+                                                                                                                        
+  <?php                                                                                                                 
+                                                                                                                        
+  declare(strict_types=1);                                                                                              
+                                                                                                                        
+  namespace App\Controller;                                                                                             
+                                                                                                                        
+  use App\Service\AopService;                                                                                           
+  use App\Service\OrderService;                                                                                         
+  use Hyperf\HttpServer\Annotation\Controller;                                                                          
+  use Hyperf\HttpServer\Annotation\GetMapping;                                                                          
+                                                                                                                        
+  #[Controller(prefix: 'hello')]                                                                                        
+  class HelloController                                                                                                 
+  {                                                                                                                     
+      public function __construct(                                                                                      
+          protected AopService $aopService,                                                                             
+          protected OrderService $orderService                                                                          
+      ) {                                                                                                               
+      }                                                                                                                 
+                                                                                                                        
+      #[GetMapping('user')]                                                                                             
+      public function user(): array                                                                                     
+      {                                                                                                                 
+          return $this->aopService->getUserInfo(1);                                                                     
+      }                                                                                                                 
+                                                                                                                        
+      #[GetMapping('order')]                                                                                            
+      public function order(): array                                                                                    
+      {                                                                                                                 
+          return $this->orderService->createOrder(1001, 'iPhone 16');                                                   
+      }                                                                                                                 
+  }                                                                                                                     
+                                                                                                                        
+  ———                                                                                                                   
+                                                                                                                        
+  ## 访问                                                                                                               
+                                                                                                                        
+  GET /hello/order                                                                                                      
+                                                                                                                        
+  日志里会记录：                                                                                                        
+                                                                                                                        
+  - 调用了哪个类                                                                                                        
+  - 调用了哪个方法                                                                                                      
+  - 参数是什么                                                                                                          
+  - 返回值是什么                                                                                                        
+  - 花了多少毫秒                                                                                                        
+                                                                                                                        
+  ———                                                                                                                   
+                                                                                                                        
+  # 3）AOP 自定义注解 demo                                                                                              
+                                                                                                                        
+  这是最值得学的。                                                                                                      
+  以后你可以做：                                                                                                        
+                                                                                                                        
+  - 操作日志注解                                                                                                        
+  - 权限校验注解                                                                                                        
+  - 幂等注解                                                                                                            
+  - 审计注解                                                                                                            
+                                                                                                                        
+  ———                                                                                                                   
+                                                                                                                        
+  ## 3.1 自定义注解                                                                                                     
+                                                                                                                        
+  ## app/Annotation/Loggable.php                                                                                        
+                                                                                                                        
+  <?php                                                                                                                 
+                                                                                                                        
+  declare(strict_types=1);                                                                                              
+                                                                                                                        
+  namespace App\Annotation;                                                                                             
+                                                                                                                        
+  use Attribute;                                                                                                        
+                                                                                                                        
+  #[Attribute(Attribute::TARGET_METHOD)]                                                                                
+  class Loggable                                                                                                        
+  {                                                                                                                     
+      public function __construct(                                                                                      
+          public string $title = ''                                                                                     
+      ) {                                                                                                               
+      }                                                                                                                 
+  }                                                                                                                     
+                                                                                                                        
+  ———                                                                                                                   
+                                                                                                                        
+  ## 3.2 切面                                                                                                           
+                                                                                                                        
+  ## app/Aspect/LoggableAspect.php                                                                                      
+                                                                                                                        
+  <?php                                                                                                                 
+                                                                                                                        
+  declare(strict_types=1);                                                                                              
+                                                                                                                        
+  namespace App\Aspect;                                                                                                 
+                                                                                                                        
+  use App\Annotation\Loggable;                                                                                          
+  use Hyperf\Di\Annotation\Aspect;                                                                                      
+  use Hyperf\Di\Aop\AbstractAspect;                                                                                     
+  use Hyperf\Di\Aop\ProceedingJoinPoint;                                                                                
+  use Hyperf\Di\ReflectionManager;                                                                                      
+  use Psr\Log\LoggerInterface;                                                                                          
+                                                                                                                        
+  #[Aspect]                                                                                                             
+  class LoggableAspect extends AbstractAspect                                                                           
+  {                                                                                                                     
+      /**                                                                                                               
+       * 按注解切                                                                                                       
+       */                                                                                                               
+      public array $annotations = [                                                                                     
+          Loggable::class,                                                                                              
+      ];                                                                                                                
+                                                                                                                        
+      public function __construct(                                                                                      
+          protected LoggerInterface $logger                                                                             
+      ) {                                                                                                               
+      }                                                                                                                 
+                                                                                                                        
+      public function process(ProceedingJoinPoint $proceedingJoinPoint)                                                 
+      {                                                                                                                 
+          $className = $proceedingJoinPoint->className;                                                                 
+          $methodName = $proceedingJoinPoint->methodName;                                                               
+                                                                                                                        
+          $reflectionMethod = ReflectionManager::reflectMethod($className, $methodName);                                
+          $attributes = $reflectionMethod->getAttributes(Loggable::class);                                              
+                                                                                                                        
+          $title = '';                                                                                                  
+          if (! empty($attributes)) {                                                                                   
+              /** @var Loggable $annotation */                                                                          
+              $annotation = $attributes[0]->newInstance();                                                              
+              $title = $annotation->title;                                                                              
+          }                                                                                                             
+                                                                                                                        
+          $this->logger->info('Loggable before', [                                                                      
+              'title' => $title,                                                                                        
+              'class' => $className,                                                                                    
+              'method' => $methodName,                                                                                  
+              'arguments' => $proceedingJoinPoint->getArguments(),                                                      
+          ]);                                                                                                           
+                                                                                                                        
+          $result = $proceedingJoinPoint->process();                                                                    
+                                                                                                                        
+          $this->logger->info('Loggable after', [                                                                       
+              'title' => $title,                                                                                        
+              'result' => $result,                                                                                      
+          ]);                                                                                                           
+                                                                                                                        
+          return $result;                                                                                               
+      }                                                                                                                 
+  }                                                                                                                     
+                                                                                                                        
+  ———                                                                                                                   
+                                                                                                                        
+  ## 3.3 使用注解                                                                                                       
+                                                                                                                        
+  ## app/Service/DemoService.php                                                                                        
+                                                                                                                        
+  <?php                                                                                                                 
+                                                                                                                        
+  declare(strict_types=1);                                                                                              
+                                                                                                                        
+  namespace App\Service;                                                                                                
+                                                                                                                        
+  use App\Annotation\Loggable;                                                                                          
+                                                                                                                        
+  class DemoService                                                                                                     
+  {                                                                                                                     
+      #[Loggable('演示查询用户信息')]                                                                                   
+      public function getProfile(int $id): array                                                                        
+      {                                                                                                                 
+          return [                                                                                                      
+              'id' => $id,                                                                                              
+              'nickname' => '李四',                                                                                     
+          ];                                                                                                            
+      }                                                                                                                 
+  }                                                                                                                     
+                                                                                                                        
+  ———                                                                                                                   
+                                                                                                                        
+  ## 3.4 Controller 调用                                                                                                
+                                                                                                                        
+  ## app/Controller/HelloController.php                                                                                 
+                                                                                                                        
+  <?php                                                                                                                 
+                                                                                                                        
+  declare(strict_types=1);                                                                                              
+                                                                                                                        
+  namespace App\Controller;                                                                                             
+                                                                                                                        
+  use App\Service\AopService;                                                                                           
+  use App\Service\DemoService;                                                                                          
+  use App\Service\OrderService;                                                                                         
+  use Hyperf\HttpServer\Annotation\Controller;                                                                          
+  use Hyperf\HttpServer\Annotation\GetMapping;                                                                          
+                                                                                                                        
+  #[Controller(prefix: 'hello')]                                                                                        
+  class HelloController                                                                                                 
+  {                                                                                                                     
+      public function __construct(                                                                                      
+          protected AopService $aopService,                                                                             
+          protected OrderService $orderService,                                                                         
+          protected DemoService $demoService                                                                            
+      ) {                                                                                                               
+      }                                                                                                                 
+                                                                                                                        
+      #[GetMapping('user')]                                                                                             
+      public function user(): array                                                                                     
+      {                                                                                                                 
+          return $this->aopService->getUserInfo(1);                                                                     
+      }                                                                                                                 
+                                                                                                                        
+      #[GetMapping('order')]                                                                                            
+      public function order(): array                                                                                    
+      {                                                                                                                 
+          return $this->orderService->createOrder(1001, 'iPhone 16');                                                   
+      }                                                                                                                 
+                                                                                                                        
+      #[GetMapping('profile')]                                                                                          
+      public function profile(): array                                                                                  
+      {                                                                                                                 
+          return $this->demoService->getProfile(2);                                                                     
+      }                                                                                                                 
+  }                                                                                                                     
+                                                                                                                        
+  ———                                                                                                                   
+                                                                                                                        
+  ## 访问                                                                                                               
+                                                                                                                        
+  GET /hello/profile                                                                                                    
+                                                                                                                        
+  日志里会出现：                                                                                                        
+                                                                                                                        
+  - 注解 title：演示查询用户信息                                                                                        
+  - 类名                                                                                                                
+  - 方法名                                                                                                              
+  - 参数                                                                                                                
+  - 返回值                                                                                                              
+                                                                                                                        
+  ———                                                                                                                   
+                                                                                                                        
+  # 怎么做到熟悉使用                                                                                                    
+                                                                                                                        
+  建议按这个顺序练：                                                                                                    
+                                                                                                                        
+  ## 第一阶段                                                                                                           
+                                                                                                                        
+  先练第一个 demo：                                                                                                     
+                                                                                                                        
+  - before 日志                                                                                                         
+  - after 日志                                                                                                          
+  - 耗时统计                                                                                                            
+  - 改返回值                                                                                                            
+                                                                                                                        
+  ## 第二阶段                                                                                                           
+                                                                                                                        
+  练第二个 demo：                                                                                                       
+                                                                                                                        
+  - 操作日志                                                                                                            
+  - 异常日志                                                                                                            
+  - 成功/失败分开记录                                                                                                   
+                                                                                                                        
+  ## 第三阶段                                                                                                           
+                                                                                                                        
+  练第三个 demo：                                                                                                       
+                                                                                                                        
+  - 自定义注解                                                                                                          
+  - 按注解切面                                                                                                          
+  - 注解带参数
+
+
+#  Hyperf AOP 做接口幂等校验 demo
+这个场景非常常见，适合：                                                                                              
+                                                                                                                        
+  - 防止重复提交订单                                                                                                    
+  - 防止重复支付                                                                                                        
+  - 防止前端重复点击按钮                                                                                                
+  - 防止接口短时间内重复请求                                                                                            
+                                                                                                                        
+  ———                                                                                                                   
+                                                                                                                        
+  # 一、实现思路                                                                                                        
+                                                                                                                        
+  我们用：                                                                                                              
+                                                                                                                        
+  - 自定义注解：Idempotent                                                                                              
+  - AOP 切面：IdempotentAspect                                                                                          
+  - Redis：存幂等 key                                                                                                   
+  - Controller：在接口方法上加注解                                                                                      
+                                                                                                                        
+  核心逻辑：                                                                                                            
+                                                                                                                        
+  1. 请求进来先检查幂等 key 是否存在                                                                                    
+  2. 如果存在，说明重复请求，直接拦截                                                                                   
+  3. 如果不存在，先写入 Redis                                                                                           
+  4. 执行业务逻辑                                                                                                       
+  5. 业务执行完返回结果                                                                                                 
+                                                                                                                        
+  ———                                                                                                                   
+                                                                                                                        
+  # 二、自定义注解                                                                                                      
+                                                                                                                        
+  文件：app/Annotation/Idempotent.php                                                                                   
+                                                                                                                        
+  <?php                                                                                                                 
+                                                                                                                        
+  declare(strict_types=1);                                                                                              
+                                                                                                                        
+  namespace App\Annotation;                                                                                             
+                                                                                                                        
+  use Attribute;                                                                                                        
+                                                                                                                        
+  #[Attribute(Attribute::TARGET_METHOD)]                                                                                
+  class Idempotent                                                                                                      
+  {                                                                                                                     
+      public function __construct(                                                                                      
+          /**                                                                                                           
+           * 幂等 key 前缀                                                                                              
+           */                                                                                                           
+          public string $prefix = 'idempotent',                                                                         
+                                                                                                                        
+          /**                                                                                                           
+           * 幂等锁有效时间，单位秒                                                                                     
+           */                                                                                                           
+          public int $ttl = 5                                                                                           
+      ) {                                                                                                               
+      }                                                                                                                 
+  }                                                                                                                     
+                                                                                                                        
+  ———                                                                                                                   
+                                                                                                                        
+  # 三、AOP 切面                                                                                                        
+                                                                                                                        
+  文件：app/Aspect/IdempotentAspect.php                                                                                 
+                                                                                                                        
+  <?php                                                                                                                 
+                                                                                                                        
+  declare(strict_types=1);                                                                                              
+                                                                                                                        
+  namespace App\Aspect;                                                                                                 
+                                                                                                                        
+  use App\Annotation\Idempotent;                                                                                        
+  use App\Service\RedisService;                                                                                         
+  use Hyperf\Context\Context;                                                                                           
+  use Hyperf\Di\Annotation\Aspect;                                                                                      
+  use Hyperf\Di\Aop\AbstractAspect;                                                                                     
+  use Hyperf\Di\Aop\ProceedingJoinPoint;                                                                                
+  use Hyperf\Di\ReflectionManager;                                                                                      
+  use Psr\Http\Message\ServerRequestInterface;                                                                          
+                                                                                                                        
+  #[Aspect]                                                                                                             
+  class IdempotentAspect extends AbstractAspect                                                                         
+  {                                                                                                                     
+      /**                                                                                                               
+       * 按注解切入                                                                                                     
+       */                                                                                                               
+      public array $annotations = [                                                                                     
+          Idempotent::class,                                                                                            
+      ];                                                                                                                
+                                                                                                                        
+      public function __construct(                                                                                      
+          protected RedisService $redisService                                                                          
+      ) {                                                                                                               
+      }                                                                                                                 
+                                                                                                                        
+      public function process(ProceedingJoinPoint $proceedingJoinPoint)                                                 
+      {                                                                                                                 
+          $className = $proceedingJoinPoint->className;                                                                 
+          $methodName = $proceedingJoinPoint->methodName;                                                               
+                                                                                                                        
+          // 反射当前方法，读取注解                                                                                     
+          $reflectionMethod = ReflectionManager::reflectMethod($className, $methodName);                                
+          $attributes = $reflectionMethod->getAttributes(Idempotent::class);                                            
+                                                                                                                        
+          if (empty($attributes)) {                                                                                     
+              return $proceedingJoinPoint->process();                                                                   
+          }                                                                                                             
+                                                                                                                        
+          /** @var Idempotent $annotation */                                                                            
+          $annotation = $attributes[0]->newInstance();                                                                  
+                                                                                                                        
+          // 获取当前请求对象                                                                                           
+          /** @var ServerRequestInterface|null $request */                                                              
+          $request = Context::get(ServerRequestInterface::class);                                                       
+                                                                                                                        
+          if (! $request) {                                                                                             
+              return $proceedingJoinPoint->process();                                                                   
+          }                                                                                                             
+                                                                                                                        
+          // 从请求头中获取幂等标识                                                                                     
+          $idempotencyKey = $request->getHeaderLine('Idempotency-Key');                                                 
+                                                                                                                        
+          if ($idempotencyKey === '') {                                                                                 
+              return [                                                                                                  
+                  'code' => 400,                                                                                        
+                  'message' => '缺少 Idempotency-Key 请求头',                                                           
+                  'data' => null,                                                                                       
+              ];                                                                                                        
+          }                                                                                                             
+                                                                                                                        
+          // 生成 Redis 幂等 key                                                                                        
+          $redisKey = sprintf(                                                                                          
+              '%s:%s:%s',                                                                                               
+              $annotation->prefix,                                                                                      
+              $methodName,                                                                                              
+              $idempotencyKey                                                                                           
+          );                                                                                                            
+                                                                                                                        
+          // 如果 key 已存在，说明重复请求                                                                              
+          if ($this->redisService->exists($redisKey)) {                                                                 
+              return [                                                                                                  
+                  'code' => 409,                                                                                        
+                  'message' => '重复请求，请勿重复提交',                                                                
+                  'data' => null,                                                                                       
+              ];                                                                                                        
+          }                                                                                                             
+                                                                                                                        
+          // 写入 Redis，设置 TTL                                                                                       
+          $this->redisService->set($redisKey, 1, $annotation->ttl);                                                     
+                                                                                                                        
+          // 执行业务方法                                                                                               
+          return $proceedingJoinPoint->process();                                                                       
+      }                                                                                                                 
+  }                                                                                                                     
+                                                                                                                        
+  ———                                                                                                                   
+                                                                                                                        
+  # 四、Controller 示例                                                                                                 
+                                                                                                                        
+  文件：app/Controller/OrderController.php                                                                              
+                                                                                                                        
+  <?php                                                                                                                 
+                                                                                                                        
+  declare(strict_types=1);                                                                                              
+                                                                                                                        
+  namespace App\Controller;                                                                                             
+                                                                                                                        
+  use App\Annotation\Idempotent;                                                                                        
+  use Hyperf\HttpServer\Annotation\Controller;                                                                          
+  use Hyperf\HttpServer\Annotation\PostMapping;                                                                         
+                                                                                                                        
+  #[Controller(prefix: 'order')]                                                                                        
+  class OrderController                                                                                                 
+  {                                                                                                                     
+      #[Idempotent(prefix: 'order:submit', ttl: 10)]                                                                    
+      #[PostMapping('submit')]                                                                                          
+      public function submit(): array                                                                                   
+      {                                                                                                                 
+          return [                                                                                                      
+              'code' => 0,                                                                                              
+              'message' => '下单成功',                                                                                  
+              'data' => [                                                                                               
+                  'order_no' => 'ORD' . date('YmdHis'),                                                                 
+              ],                                                                                                        
+          ];                                                                                                            
+      }                                                                                                                 
+  }                                                                                                                     
+                                                                                                                        
+  ———                                                                                                                   
+                                                                                                                        
+  # 五、请求方式                                                                                                        
+                                                                                                                        
+  请求时要带一个请求头：                                                                                                
+                                                                                                                        
+  Idempotency-Key: abc123456                                                                                            
+                                                                                                                        
+  例如：                                                                                                                
+                                                                                                                        
+  POST /order/submit                                                                                                    
+  Idempotency-Key: abc123456                                                                                            
+                                                                                                                        
+  ———                                                                                                                   
+                                                                                                                        
+  # 六、效果说明                                                                                                        
+                                                                                                                        
+  ## 第一次请求                                                                                                         
+                                                                                                                        
+  Redis 里没有这个 key，正常执行：                                                                                      
+                                                                                                                        
+  {                                                                                                                     
+    "code": 0,                                                                                                          
+    "message": "下单成功",                                                                                              
+    "data": {                                                                                                           
+      "order_no": "ORD20260502120000"                                                                                   
+    }                                                                                                                   
+  }                                                                                                                     
+                                                                                                                        
+  ## 第二次请求（同一个 Idempotency-Key）                                                                               
+                                                                                                                        
+  Redis 已经有记录，直接拦截：                                                                                          
+                                                                                                                        
+  {                                                                                                                     
+    "code": 409,                                                                                                        
+    "message": "重复请求，请勿重复提交",                                                                                
+    "data": null                                                                                                        
+  }                                                                                                                     
+                                                                                                                        
+  ———                                                                                                                   
+                                                                                                                        
+  # 七、Redis 里会存什么                                                                                                
+                                                                                                                        
+  比如：                                                                                                                
+                                                                                                                        
+  - prefix = order:submit                                                                                               
+  - method = submit                                                                                                     
+  - header = abc123456                                                                                                  
+                                                                                                                        
+  最终 Redis key 类似：                                                                                                 
+                                                                                                                        
+  order:submit:submit:abc123456                                                                                         
+                                                                                                                        
+  TTL 是 10 秒。                                                                                                        
+                                                                                                                        
+  ———                                                                                                                   
+                                                                                                                        
+  # 八、原理说明                                                                                                        
+                                                                                                                        
+  ## 1）为什么要用 Idempotency-Key                                                                                      
+                                                                                                                        
+  因为幂等判断必须有“同一请求”的唯一标识。                                                                              
+  前端或调用方每次提交时带上一个唯一 key，就能识别是否重复提交。                                                        
+                                                                                                                        
+  ———                                                                                                                   
+                                                                                                                        
+  ## 2）为什么用 Redis                                                                                                  
+                                                                                                                        
+  因为 Redis：                                                                                                          
+                                                                                                                        
+  - 速度快                                                                                                              
+  - 适合短期状态保存                                                                                                    
+  - 支持 TTL 自动过期                                                                                                   
+  - 非常适合做幂等控制                                                                                                  
+                                                                                                                        
+  ———                                                                                                                   
+                                                                                                                        
+  ## 3）为什么适合用 AOP                                                                                                
+                                                                                                                        
+  幂等校验是典型的横切逻辑：                                                                                            
+                                                                                                                        
+  - 不是核心业务                                                                                                        
+  - 会出现在很多接口上                                                                                                  
+  - 适合统一抽离                                                                                                        
+                                                                                                                        
+  所以很适合用：                                                                                                        
+                                                                                                                        
+  - 注解声明                                                                                                            
+  - 切面统一处理                                                                                                        
+                                                                                                                        
+  ———                                                                                                                   
+                                                                                                                        
+  # 九、可继续增强的点                                                                                                  
+                                                                                                                        
+  这个 demo 是基础版，真实项目里通常还会继续增强：                                                                      
+                                                                                                                        
+  ## 1. 按用户维度加幂等                                                                                                
+                                                                                                                        
+  比如 Redis key 里拼接用户 ID：                                                                                        
+                                                                                                                        
+  order:submit:user:1001:abc123456                                                                                      
+                                                                                                                        
+  ## 2. 成功后缓存响应结果                                                                                              
+                                                                                                                        
+  第二次相同请求不只是报重复，而是直接返回第一次结果。                                                                  
+                                                                                                                        
+  ## 3. 结合请求参数签名                                                                                                
+                                                                                                                        
+  如果前端不传 Idempotency-Key，也可以服务端自己根据：                                                                  
+                                                                                                                        
+  - 用户 ID                                                                                                             
+  - 接口路径                                                                                                            
+  - 请求参数                                                                                                            
+                                                                                                                        
+  生成签名 key。                                                                                                        
+                                                                                                                        
+  ## 4. 用 SET NX EX                                                                                                    
+                                                                                                                        
+  比 exists + set 更严谨，可以避免极端并发下重复写入。                                                                  
+                                                                                                                        
+  ———                                                                                                                   
+                                                                                                                        
+  # 十、更严谨版本建议                                                                                                  
+                                                                                                                        
+  你当前这个 demo 用的是：                                                                                              
+                                                                                                                        
+  if ($this->redisService->exists($redisKey)) {                                                                         
+      ...                                                                                                               
+  }                                                                                                                     
+  $this->redisService->set($redisKey, 1, $annotation->ttl);                                                             
+                                                                                                                        
+  这在极端高并发下不是原子操作。                                                                                        
+                                                                                                                        
+  更严谨应该直接在 Redis 里做：                                                                                         
+                                                                                                                        
+  $redis->set($redisKey, 1, ['nx', 'ex' => $annotation->ttl]);                                                          
+                                                                                                                        
+  如果你要，我下一条可以继续给你补一个：                                                                                
+                                                                                                                        
+  ## AOP 幂等校验“原子版” demo（基于 Redis SET NX EX）                                                                  
+                                                                                                                        
+  这个会更接近生产可用写法。
