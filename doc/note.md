@@ -5906,3 +5906,1459 @@ return [
   var_dump('IdempotentAspect triggered');                                                                                                                                          
                                                                                                                                                                                    
   如果请求 /order/test 完全没输出，说明就是 切面没织入成功。
+
+
+# 一、核心区别                                                                                                                                                                   
+                                                                                                                                                                                   
+  ## 你这套                                                                                                                                                                        
+                                                                                                                                                                                   
+  特点：                                                                                                                                                                           
+                                                                                                                                                                                   
+  - 错误码定义在 Constants 枚举类里                                                                                                                                                
+  - 通过 @Message / getMessage() 自动取错误文案                                                                                                                                    
+  - BusinessException 只传 code 也能自动带 message                                                                                                                                 
+  - 继承的是：                                                                                                                                                                     
+                                                                                                                                                                                   
+  Hyperf\Server\Exception\ServerException                                                                                                                                          
+                                                                                                                                                                                   
+  示例：                                                                                                                                                                           
+                                                                                                                                                                                   
+  throw new BusinessException(ErrorCode::SERVER_ERROR);                                                                                                                            
+                                                                                                                                                                                   
+  会自动得到：                                                                                                                                                                     
+                                                                                                                                                                                   
+  message = ErrorCode::getMessage(ErrorCode::SERVER_ERROR)                                                                                                                         
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 我前面那套                                                                                                                                                                    
+                                                                                                                                                                                   
+  特点：                                                                                                                                                                           
+                                                                                                                                                                                   
+  - ErrorCode 只是普通常量类                                                                                                                                                       
+  - BusinessException 里显式传 message + code                                                                                                                                      
+  - 更偏业务自定义                                                                                                                                                                 
+  - 继承的是：                                                                                                                                                                     
+                                                                                                                                                                                   
+  RuntimeException                                                                                                                                                                 
+                                                                                                                                                                                   
+  示例：                                                                                                                                                                           
+                                                                                                                                                                                   
+  throw new BusinessException('用户不存在', ErrorCode::USER_NOT_FOUND);                                                                                                            
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 二、最本质的差别                                                                                                                                                               
+                                                                                                                                                                                   
+  ## 你这套：错误码驱动消息                                                                                                                                                        
+                                                                                                                                                                                   
+  核心思想是：                                                                                                                                                                     
+                                                                                                                                                                                   
+  > 先有错误码，再通过错误码反查 message                                                                                                                                           
+                                                                                                                                                                                   
+  例如：                                                                                                                                                                           
+                                                                                                                                                                                   
+  throw new BusinessException(ErrorCode::SERVER_ERROR);                                                                                                                            
+                                                                                                                                                                                   
+  框架自动补：                                                                                                                                                                     
+                                                                                                                                                                                   
+  Server Error！                                                                                                                                                                   
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 我这套：业务场景直接给消息                                                                                                                                                    
+                                                                                                                                                                                   
+  核心思想是：                                                                                                                                                                     
+                                                                                                                                                                                   
+  > 抛异常时，业务自己决定 message 是什么                                                                                                                                          
+                                                                                                                                                                                   
+  例如：                                                                                                                                                                           
+                                                                                                                                                                                   
+  throw new BusinessException('库存不足', ErrorCode::STOCK_NOT_ENOUGH);                                                                                                            
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 三、你这套的优点                                                                                                                                                               
+                                                                                                                                                                                   
+  ## 1）更简洁                                                                                                                                                                     
+                                                                                                                                                                                   
+  抛异常时可以直接写：                                                                                                                                                             
+                                                                                                                                                                                   
+  throw new BusinessException(ErrorCode::SERVER_ERROR);                                                                                                                            
+                                                                                                                                                                                   
+  不用每次都传 message。                                                                                                                                                           
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 2）错误码和文案统一绑定                                                                                                                                                       
+                                                                                                                                                                                   
+  消息集中在常量类里：                                                                                                                                                             
+                                                                                                                                                                                   
+  #[Constants]                                                                                                                                                                     
+  class ErrorCode extends AbstractConstants                                                                                                                                        
+  {                                                                                                                                                                                
+      /**                                                                                                                                                                          
+       * @Message("Server Error！")                                                                                                                                                
+       */                                                                                                                                                                          
+      const SERVER_ERROR = 500;                                                                                                                                                    
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  这样不会出现：                                                                                                                                                                   
+                                                                                                                                                                                   
+  - 同一个错误码，不同地方写不同 message                                                                                                                                           
+  - message 到处散落                                                                                                                                                               
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 3）更适合统一规范项目                                                                                                                                                         
+                                                                                                                                                                                   
+  尤其是大一点的项目，所有错误码都集中管理，比较规整。                                                                                                                             
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 4）方便国际化扩展                                                                                                                                                             
+                                                                                                                                                                                   
+  虽然你这个例子还是写死中文/英文消息，但它已经是“code -> message”映射模式了，后续切语言更顺。                                                                                     
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 四、你这套的缺点                                                                                                                                                               
+                                                                                                                                                                                   
+  ## 1）灵活性差一点                                                                                                                                                               
+                                                                                                                                                                                   
+  有些业务异常 message 需要动态变化。                                                                                                                                              
+                                                                                                                                                                                   
+  例如：                                                                                                                                                                           
+                                                                                                                                                                                   
+  throw new BusinessException("商品 {$id} 不存在", ErrorCode::PRODUCT_NOT_FOUND);                                                                                                  
+                                                                                                                                                                                   
+  但你这套默认更偏静态 message。                                                                                                                                                   
+                                                                                                                                                                                   
+  虽然你也能传第二个参数覆盖：                                                                                                                                                     
+                                                                                                                                                                                   
+  throw new BusinessException(ErrorCode::SERVER_ERROR, '自定义错误');                                                                                                              
+                                                                                                                                                                                   
+  但默认模式还是偏固定文案。                                                                                                                                                       
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 2）错误码类会越来越大                                                                                                                                                         
+                                                                                                                                                                                   
+  如果项目业务很多，ErrorCode 可能会变成超大文件。                                                                                                                                 
+                                                                                                                                                                                   
+  比如同时堆：                                                                                                                                                                     
+                                                                                                                                                                                   
+  - 用户模块                                                                                                                                                                       
+  - 订单模块                                                                                                                                                                       
+  - 支付模块                                                                                                                                                                       
+  - 库存模块                                                                                                                                                                       
+  - 营销模块                                                                                                                                                                       
+                                                                                                                                                                                   
+  最后会比较臃肿。                                                                                                                                                                 
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 3）依赖 Hyperf Constants 体系                                                                                                                                                 
+                                                                                                                                                                                   
+  你这套依赖：                                                                                                                                                                     
+                                                                                                                                                                                   
+  Hyperf\Constants\AbstractConstants                                                                                                                                               
+  Hyperf\Constants\Annotation\Constants                                                                                                                                            
+                                                                                                                                                                                   
+  耦合 Hyperf 更深一些。                                                                                                                                                           
+  如果以后迁移框架，这部分可移植性不如普通常量类。                                                                                                                                 
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 五、我前面那套的优点                                                                                                                                                           
+                                                                                                                                                                                   
+  ## 1）更直白                                                                                                                                                                     
+                                                                                                                                                                                   
+  一眼能看懂：                                                                                                                                                                     
+                                                                                                                                                                                   
+  throw new BusinessException('用户不存在', ErrorCode::USER_NOT_FOUND);                                                                                                            
+                                                                                                                                                                                   
+  业务语义非常直接。                                                                                                                                                               
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 2）更灵活                                                                                                                                                                     
+                                                                                                                                                                                   
+  适合动态消息：                                                                                                                                                                   
+                                                                                                                                                                                   
+  throw new BusinessException("订单 {$orderNo} 不存在", ErrorCode::ORDER_NOT_FOUND);                                                                                               
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 3）框架耦合更低                                                                                                                                                               
+                                                                                                                                                                                   
+  普通 PHP 异常类 + 普通常量类，迁移成本低。                                                                                                                                       
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 4）更适合中小项目快速开发                                                                                                                                                     
+                                                                                                                                                                                   
+  不用额外引入太多 Hyperf 常量注解体系，落地更快。                                                                                                                                 
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 六、我前面那套的缺点                                                                                                                                                           
+                                                                                                                                                                                   
+  ## 1）容易 message 不统一                                                                                                                                                        
+                                                                                                                                                                                   
+  同一个错误码，可能有人写：                                                                                                                                                       
+                                                                                                                                                                                   
+  '用户不存在'                                                                                                                                                                     
+                                                                                                                                                                                   
+  另一个地方写：                                                                                                                                                                   
+                                                                                                                                                                                   
+  '该用户不存在'                                                                                                                                                                   
+                                                                                                                                                                                   
+  前端看到文案可能不一致。                                                                                                                                                         
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 2）每次都要手动写 message                                                                                                                                                     
+                                                                                                                                                                                   
+  会稍微啰嗦一点。                                                                                                                                                                 
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 3）规范依赖团队约束                                                                                                                                                           
+                                                                                                                                                                                   
+  如果团队不统一，很容易：                                                                                                                                                         
+                                                                                                                                                                                   
+  - code 乱用                                                                                                                                                                      
+  - message 乱写                                                                                                                                                                   
+  - 同类异常不一致                                                                                                                                                                 
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 七、继承类也有区别                                                                                                                                                             
+                                                                                                                                                                                   
+  ## 你这套                                                                                                                                                                        
+                                                                                                                                                                                   
+  继承：                                                                                                                                                                           
+                                                                                                                                                                                   
+  ServerException                                                                                                                                                                  
+                                                                                                                                                                                   
+  更偏 Hyperf 服务端异常体系。                                                                                                                                                     
+                                                                                                                                                                                   
+  ## 我这套                                                                                                                                                                        
+                                                                                                                                                                                   
+  继承：                                                                                                                                                                           
+                                                                                                                                                                                   
+  RuntimeException                                                                                                                                                                 
+                                                                                                                                                                                   
+  更通用。                                                                                                                                                                         
+                                                                                                                                                                                   
+  ### 实际上                                                                                                                                                                       
+                                                                                                                                                                                   
+  如果你整个项目就是标准 Hyperf 服务端项目，继承 ServerException 没问题。                                                                                                          
+  如果你想异常体系更“纯业务化”、更独立，RuntimeException 更中性。                                                                                                                  
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 八、适用场景建议                                                                                                                                                               
+                                                                                                                                                                                   
+  ## 适合你这套的场景                                                                                                                                                              
+                                                                                                                                                                                   
+  如果你项目：                                                                                                                                                                     
+                                                                                                                                                                                   
+  - 规范要求高                                                                                                                                                                     
+  - 错误码体系比较严格                                                                                                                                                             
+  - 希望 code 和 message 强绑定                                                                                                                                                    
+  - 团队多人协作                                                                                                                                                                   
+  - 希望统一错误文案来源                                                                                                                                                           
+                                                                                                                                                                                   
+  那你这套更好。                                                                                                                                                                   
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 适合我前面那套的场景                                                                                                                                                          
+                                                                                                                                                                                   
+  如果你项目：                                                                                                                                                                     
+                                                                                                                                                                                   
+  - 业务还在快速迭代                                                                                                                                                               
+  - 需要很多动态 message                                                                                                                                                           
+  - 想写法简单直接                                                                                                                                                                 
+  - 希望框架耦合更低                                                                                                                                                               
+                                                                                                                                                                                   
+  那我前面那套更合适。                                                                                                                                                             
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 九、企业里常见折中方案                                                                                                                                                         
+                                                                                                                                                                                   
+  其实很多项目最后会用 混合版：                                                                                                                                                    
+                                                                                                                                                                                   
+  ## 错误码统一管理                                                                                                                                                                
+                                                                                                                                                                                   
+  ErrorCode::USER_NOT_FOUND                                                                                                                                                        
+                                                                                                                                                                                   
+  ## 默认消息从错误码取                                                                                                                                                            
+                                                                                                                                                                                   
+  throw new BusinessException(ErrorCode::USER_NOT_FOUND);                                                                                                                          
+                                                                                                                                                                                   
+  ## 但允许覆盖自定义消息                                                                                                                                                          
+                                                                                                                                                                                   
+  throw new BusinessException(ErrorCode::USER_NOT_FOUND, "用户 {$id} 不存在");                                                                                                     
+                                                                                                                                                                                   
+  也就是你这套思路，但保留动态 message 能力。                                                                                                                                      
+  这个通常是最实用的。                                                                                                                                                             
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 十、推荐结论                                                                                                                                                                   
+                                                                                                                                                                                   
+  ## 如果你问“哪套更好”                                                                                                                                                            
+                                                                                                                                                                                   
+  不是绝对谁更好，而是：                                                                                                                                                           
+                                                                                                                                                                                   
+  - 规范性：你这套更强                                                                                                                                                             
+  - 灵活性：我那套更强                                                                                                                                                             
+                                                                                                                                                                                   
+  ## 如果是企业项目                                                                                                                                                                
+                                                                                                                                                                                   
+  我更推荐你这套的升级版：                                                                                                                                                         
+                                                                                                                                                                                   
+  ### 建议用：                                                                                                                                                                     
+                                                                                                                                                                                   
+  - ErrorCode 统一维护 code + 默认 message                                                                                                                                         
+  - BusinessException 支持只传 code                                                                                                                                                
+  - 也支持传自定义 message 覆盖默认 message                                                                                                                                        
+  - 统一异常处理器返回 JSON                                                                                                                                                        
+                                                                                                                                                                                   
+  这个是最平衡的方案。                                                                                                                                                             
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 十一、一句话总结                                                                                                                                                               
+                                                                                                                                                                                   
+  ## 你这套                                                                                                                                                                        
+                                                                                                                                                                                   
+  更规范、统一、适合中大型项目                                                                                                                                                     
+                                                                                                                                                                                   
+  ## 我那套                                                                                                                                                                        
+                                                                                                                                                                                   
+  更灵活、直白、适合快速开发和动态业务                                                                                                                                             
+                                                                                                                                                                                   
+  ———
+return [                                                                                                                                                                         
+      'handler' => [                                                                                                                                                               
+          'http' => [                                                                                                                                                              
+              Hyperf\HttpServer\Exception\Handler\HttpExceptionHandler::class,                                                                                                     
+              App\Exception\Handler\AppExceptionHandler::class,                                                                                                                    
+          ],                                                                                                                                                                       
+      ],                                                                                                                                                                           
+  ];                                                                                                                                                                               
+                                                                                                                                                                                   
+  表示：                                                                                                                                                                           
+                                                                                                                                                                                   
+  > 给 http 这个 server 注册一组“异常处理器链”。                                                                                                                                   
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 1. handler 是什么                                                                                                                                                              
+                                                                                                                                                                                   
+  这是 Hyperf 的异常处理器配置。                                                                                                                                                   
+                                                                                                                                                                                   
+  官方文档说明：                                                                                                                                                                   
+                                                                                                                                                                                   
+  - http 对应 server.php 里的服务名                                                                                                                                                
+  - 一个请求里如果抛出异常，Hyperf 会按这里配置的顺序，把异常交给这些处理器处理                                                                                                    
+  - 数组顺序决定处理顺序                                                                                                                                                           
+                                                                                                                                                                                   
+  官方说明里明确提到：                                                                                                                                                             
+                                                                                                                                                                                   
+  > 每个异常处理器配置数组的顺序决定了异常在处理器间传递的顺序。                                                                                                                   
+  > 来源：Hyperf 异常处理文档                                                                                                                                                      
+  > https://geekdaxue.co/read/hyperf-3.0-doc/docs-zh-cn-exception-handler.md                                                                                                       
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 2. 为什么是 http                                                                                                                                                               
+                                                                                                                                                                                   
+  这里：                                                                                                                                                                           
+                                                                                                                                                                                   
+  'http' => [                                                                                                                                                                      
+                                                                                                                                                                                   
+  表示：                                                                                                                                                                           
+                                                                                                                                                                                   
+  > 这组异常处理器是给 http server 用的                                                                                                                                            
+                                                                                                                                                                                   
+  也就是处理你 HTTP 请求过程中抛出的异常。                                                                                                                                         
+                                                                                                                                                                                   
+  如果你项目里还有别的 server，比如 websocket、grpc，也可以给它们单独配不同处理器。                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 3. HttpExceptionHandler 是干嘛的                                                                                                                                               
+                                                                                                                                                                                   
+  这个：                                                                                                                                                                           
+                                                                                                                                                                                   
+  Hyperf\HttpServer\Exception\Handler\HttpExceptionHandler::class                                                                                                                  
+                                                                                                                                                                                   
+  主要处理 HTTP 层异常，比如：                                                                                                                                                     
+                                                                                                                                                                                   
+  - 404 路由不存在                                                                                                                                                                 
+  - 405 请求方法不允许                                                                                                                                                             
+  - 其他 HttpException                                                                                                                                                             
+                                                                                                                                                                                   
+  Hyperf 官方路由文档里明确说了：                                                                                                                                                  
+                                                                                                                                                                                   
+  - 路由找不到、方法不允许等，会抛出 HttpException                                                                                                                                 
+  - 可以通过 HttpExceptionHandler 来处理                                                                                                                                           
+  - 这个处理器需要你自己注册到 exceptions.php                                                                                                                                      
+                                                                                                                                                                                   
+  来源：Hyperf 路由文档                                                                                                                                                            
+  https://geekdaxue.co/read/hyperf-3.0-doc/docs-zh-cn-router.md                                                                                                                    
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 4. AppExceptionHandler 是干嘛的                                                                                                                                                
+                                                                                                                                                                                   
+  这个：                                                                                                                                                                           
+                                                                                                                                                                                   
+  App\Exception\Handler\AppExceptionHandler::class                                                                                                                                 
+                                                                                                                                                                                   
+  一般是你自己写的业务异常处理器，通常负责：                                                                                                                                       
+                                                                                                                                                                                   
+  - BusinessException                                                                                                                                                              
+  - 参数校验异常                                                                                                                                                                   
+  - 自定义业务异常                                                                                                                                                                 
+  - 未捕获异常的统一 JSON 返回                                                                                                                                                     
+                                                                                                                                                                                   
+  比如你会在里面处理：                                                                                                                                                             
+                                                                                                                                                                                   
+  throw new BusinessException(...)                                                                                                                                                 
+                                                                                                                                                                                   
+  然后统一返回：                                                                                                                                                                   
+                                                                                                                                                                                   
+  {                                                                                                                                                                                
+    "code": 10001,                                                                                                                                                                 
+    "message": "用户不存在",                                                                                                                                                       
+    "data": null                                                                                                                                                                   
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 5. 为什么要配两个                                                                                                                                                              
+                                                                                                                                                                                   
+  因为这两类异常不是一回事：                                                                                                                                                       
+                                                                                                                                                                                   
+  ## HttpExceptionHandler                                                                                                                                                          
+                                                                                                                                                                                   
+  处理的是框架层 / HTTP 层异常                                                                                                                                                     
+                                                                                                                                                                                   
+  例如：                                                                                                                                                                           
+                                                                                                                                                                                   
+  - /abc 路由不存在                                                                                                                                                                
+  - POST /user/info 但只定义了 GET                                                                                                                                                 
+                                                                                                                                                                                   
+  这类问题甚至可能在 Controller 还没进之前就发生了。                                                                                                                               
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## AppExceptionHandler                                                                                                                                                           
+                                                                                                                                                                                   
+  处理的是你的业务异常                                                                                                                                                             
+                                                                                                                                                                                   
+  例如：                                                                                                                                                                           
+                                                                                                                                                                                   
+  - 用户不存在                                                                                                                                                                     
+  - 库存不足                                                                                                                                                                       
+  - 重复下单                                                                                                                                                                       
+  - token 无效                                                                                                                                                                     
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 6. 为什么是一个数组                                                                                                                                                            
+                                                                                                                                                                                   
+  因为 Hyperf 的异常处理机制是责任链/管道式的。                                                                                                                                    
+                                                                                                                                                                                   
+  你可以理解为：                                                                                                                                                                   
+                                                                                                                                                                                   
+  异常抛出                                                                                                                                                                         
+    -> 先给第一个处理器                                                                                                                                                            
+    -> 第一个不处理，再给第二个                                                                                                                                                    
+    -> 第二个还不处理，再往后传                                                                                                                                                    
+                                                                                                                                                                                   
+  官方文档也这么描述：                                                                                                                                                             
+                                                                                                                                                                                   
+  > 整个处理流程可以理解为一个管道                                                                                                                                                 
+  > 若前一个异常处理器调用 $this->stopPropagation() 则不再往后传递                                                                                                                 
+  > 来源：                                                                                                                                                                         
+  > https://geekdaxue.co/read/hyperf-3.0-doc/docs-zh-cn-exception-handler.md                                                                                                       
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 7. 这两个的顺序为什么重要                                                                                                                                                      
+                                                                                                                                                                                   
+  比如：                                                                                                                                                                           
+                                                                                                                                                                                   
+  'http' => [                                                                                                                                                                      
+      Hyperf\HttpServer\Exception\Handler\HttpExceptionHandler::class,                                                                                                             
+      App\Exception\Handler\AppExceptionHandler::class,                                                                                                                            
+  ],                                                                                                                                                                               
+                                                                                                                                                                                   
+  表示：                                                                                                                                                                           
+                                                                                                                                                                                   
+  1. 先让 HttpExceptionHandler 试着处理                                                                                                                                            
+  2. 如果它不处理，再交给 AppExceptionHandler                                                                                                                                      
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 8. 这个顺序是否一定这样写                                                                                                                                                      
+                                                                                                                                                                                   
+  不一定。                                                                                                                                                                         
+                                                                                                                                                                                   
+  要看你的 AppExceptionHandler 想怎么处理。                                                                                                                                        
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 常见写法一：先框架 HTTP 异常，再业务异常                                                                                                                                      
+                                                                                                                                                                                   
+  'http' => [                                                                                                                                                                      
+      Hyperf\HttpServer\Exception\Handler\HttpExceptionHandler::class,                                                                                                             
+      App\Exception\Handler\AppExceptionHandler::class,                                                                                                                            
+  ],                                                                                                                                                                               
+                                                                                                                                                                                   
+  适合：                                                                                                                                                                           
+                                                                                                                                                                                   
+  - 404/405 先按框架 HTTP 方式处理                                                                                                                                                 
+  - 业务异常后面再处理                                                                                                                                                             
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 常见写法二：先业务异常，再 HTTP 异常                                                                                                                                          
+                                                                                                                                                                                   
+  很多项目更常见会这么排：                                                                                                                                                         
+                                                                                                                                                                                   
+  'http' => [                                                                                                                                                                      
+      App\Exception\Handler\AppExceptionHandler::class,                                                                                                                            
+      Hyperf\HttpServer\Exception\Handler\HttpExceptionHandler::class,                                                                                                             
+  ],                                                                                                                                                                               
+                                                                                                                                                                                   
+  原因是：                                                                                                                                                                         
+                                                                                                                                                                                   
+  - 业务异常优先交给自己处理器                                                                                                                                                     
+  - 如果不是业务异常，再交给 HTTP 异常处理器                                                                                                                                       
+                                                                                                                                                                                   
+  这个往往更符合“自定义优先”的思路。                                                                                                                                               
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 9. 具体是怎么工作的                                                                                                                                                            
+                                                                                                                                                                                   
+  假设请求：                                                                                                                                                                       
+                                                                                                                                                                                   
+  GET /user/info                                                                                                                                                                   
+                                                                                                                                                                                   
+  Service 里抛了：                                                                                                                                                                 
+                                                                                                                                                                                   
+  throw new BusinessException('用户不存在', 10001);                                                                                                                                
+                                                                                                                                                                                   
+  流程可能是：                                                                                                                                                                     
+                                                                                                                                                                                   
+  BusinessException                                                                                                                                                                
+   -> HttpExceptionHandler                                                                                                                                                         
+      发现不是它要处理的 HTTP 异常                                                                                                                                                 
+   -> AppExceptionHandler                                                                                                                                                          
+      发现是业务异常                                                                                                                                                               
+      返回 JSON                                                                                                                                                                    
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  再比如请求：                                                                                                                                                                     
+                                                                                                                                                                                   
+  GET /not-found                                                                                                                                                                   
+                                                                                                                                                                                   
+  没有路由。                                                                                                                                                                       
+                                                                                                                                                                                   
+  流程可能是：                                                                                                                                                                     
+                                                                                                                                                                                   
+  HttpException(404)                                                                                                                                                               
+   -> HttpExceptionHandler                                                                                                                                                         
+      处理 404                                                                                                                                                                     
+      返回响应                                                                                                                                                                     
+   -> 不再继续往后传                                                                                                                                                               
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 10. 为什么框架要这么设计                                                                                                                                                       
+                                                                                                                                                                                   
+  因为异常来源很多，不能都混在一个处理器里：                                                                                                                                       
+                                                                                                                                                                                   
+  ## 一类是 HTTP 层异常                                                                                                                                                            
+                                                                                                                                                                                   
+  - 404                                                                                                                                                                            
+  - 405                                                                                                                                                                            
+  - 路由异常                                                                                                                                                                       
+                                                                                                                                                                                   
+  ## 一类是业务层异常                                                                                                                                                              
+                                                                                                                                                                                   
+  - 用户不存在                                                                                                                                                                     
+  - 库存不足                                                                                                                                                                       
+                                                                                                                                                                                   
+  ## 一类是系统异常                                                                                                                                                                
+                                                                                                                                                                                   
+  - 数据库错误                                                                                                                                                                     
+  - 空指针                                                                                                                                                                         
+  - 类型错误                                                                                                                                                                       
+                                                                                                                                                                                   
+  所以框架用“处理器链”方式，让你：                                                                                                                                                 
+                                                                                                                                                                                   
+  - 分层处理                                                                                                                                                                       
+  - 按类型处理                                                                                                                                                                     
+  - 自定义扩展                                                                                                                                                                     
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 11. 你可以怎么理解这段配置                                                                                                                                                     
+                                                                                                                                                                                   
+  你可以把它理解成：                                                                                                                                                               
+                                                                                                                                                                                   
+  'http' => [                                                                                                                                                                      
+      先处理框架HTTP异常,                                                                                                                                                          
+      再处理我自己的应用异常,                                                                                                                                                      
+  ]                                                                                                                                                                                
+                                                                                                                                                                                   
+  或者更直白：                                                                                                                                                                     
+                                                                                                                                                                                   
+  > 这个配置是在告诉 Hyperf：                                                                                                                                                      
+  > HTTP 请求出错时，按这个顺序找人来处理异常。                                                                                                                                    
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 12. 实战建议                                                                                                                                                                   
+                                                                                                                                                                                   
+  如果你是企业项目，我更推荐这样排：                                                                                                                                               
+                                                                                                                                                                                   
+  return [                                                                                                                                                                         
+      'handler' => [                                                                                                                                                               
+          'http' => [                                                                                                                                                              
+              App\Exception\Handler\AppExceptionHandler::class,                                                                                                                    
+              Hyperf\HttpServer\Exception\Handler\HttpExceptionHandler::class,                                                                                                     
+          ],                                                                                                                                                                       
+      ],                                                                                                                                                                           
+  ];                                                                                                                                                                               
+                                                                                                                                                                                   
+  原因：                                                                                                                                                                           
+                                                                                                                                                                                   
+  - 你的业务异常优先自己接管                                                                                                                                                       
+  - 404/405 等 HTTP 异常再由框架处理                                                                                                                                               
+  - 自定义能力更强                                                                                                                                                                 
+                                                                                                                                                                                   
+  但如果你的 AppExceptionHandler 写得比较泛，可能会把 HTTP 异常也吞掉，那就要谨慎。                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 13. 一句话总结                                                                                                                                                                 
+                                                                                                                                                                                   
+  这段配置的本质就是：                                                                                                                                                             
+                                                                                                                                                                                   
+  > 给 http 服务注册一条“异常处理链”，                                                                                                                                             
+  > 异常发生后，Hyperf 会按顺序把异常交给这些处理器处理。                                                                                                                          
+                                                                                                                                                                                   
+  其中：                                                                                                                                                                           
+                                                                                                                                                                                   
+  - HttpExceptionHandler 负责 HTTP 层异常                                                                                                                                          
+  - AppExceptionHandler 负责 应用/业务层异常                                                                                                                                       
+                                                                                                                                                                                   
+  ———
+
+• 区别主要在 处理范围 和 完整性。                                                                                                                                                  
+                                                                                                                                                                                   
+  你现在对比的是两种配置：                                                                                                                                                         
+                                                                                                                                                                                   
+  ## 方案 A                                                                                                                                                                        
+                                                                                                                                                                                   
+  return [                                                                                                                                                                         
+      'handler' => [                                                                                                                                                               
+          'http' => [                                                                                                                                                              
+              Hyperf\HttpServer\Exception\Handler\HttpExceptionHandler::class,                                                                                                     
+              App\Exception\Handler\AppExceptionHandler::class,                                                                                                                    
+          ],                                                                                                                                                                       
+      ],                                                                                                                                                                           
+  ];                                                                                                                                                                               
+                                                                                                                                                                                   
+  ## 方案 B                                                                                                                                                                        
+                                                                                                                                                                                   
+  return [                                                                                                                                                                         
+      'handler' => [                                                                                                                                                               
+          'http' => [                                                                                                                                                              
+              App\Exception\Handler\BusinessExceptionHandler::class,                                                                                                               
+          ],                                                                                                                                                                       
+      ],                                                                                                                                                                           
+  ];                                                                                                                                                                               
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 一、最直接区别                                                                                                                                                                 
+                                                                                                                                                                                   
+  ## 方案 A                                                                                                                                                                        
+                                                                                                                                                                                   
+  处理的是 更完整的一整套 HTTP 异常链：                                                                                                                                            
+                                                                                                                                                                                   
+  - HttpExceptionHandler                                                                                                                                                           
+    处理框架 HTTP 异常，比如：                                                                                                                                                     
+      - 404                                                                                                                                                                        
+      - 405                                                                                                                                                                        
+      - 路由异常                                                                                                                                                                   
+  - AppExceptionHandler                                                                                                                                                            
+    处理你自己应用里的异常，比如：                                                                                                                                                 
+      - 业务异常                                                                                                                                                                   
+      - 参数异常                                                                                                                                                                   
+      - 系统异常                                                                                                                                                                   
+      - 自定义异常                                                                                                                                                                 
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 方案 B                                                                                                                                                                        
+                                                                                                                                                                                   
+  只注册了：                                                                                                                                                                       
+                                                                                                                                                                                   
+  BusinessExceptionHandler::class                                                                                                                                                  
+                                                                                                                                                                                   
+  它通常只处理：                                                                                                                                                                   
+                                                                                                                                                                                   
+  - BusinessException                                                                                                                                                              
+                                                                                                                                                                                   
+  也就是说，它只负责你自己定义的某一类业务异常。                                                                                                                                   
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 二、处理范围对比                                                                                                                                                               
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 方案 A 的处理范围更大                                                                                                                                                         
+                                                                                                                                                                                   
+  例如它可以覆盖：                                                                                                                                                                 
+                                                                                                                                                                                   
+  ### 1）路由不存在                                                                                                                                                                
+                                                                                                                                                                                   
+  GET /not-found                                                                                                                                                                   
+                                                                                                                                                                                   
+  抛出 404，HttpExceptionHandler 可以处理。                                                                                                                                        
+                                                                                                                                                                                   
+  ### 2）请求方法不允许                                                                                                                                                            
+                                                                                                                                                                                   
+  POST /user/info                                                                                                                                                                  
+                                                                                                                                                                                   
+  但只定义了 GET，会抛 405，也能处理。                                                                                                                                             
+                                                                                                                                                                                   
+  ### 3）业务异常                                                                                                                                                                  
+                                                                                                                                                                                   
+  throw new BusinessException(...)                                                                                                                                                 
+                                                                                                                                                                                   
+  可以交给 AppExceptionHandler 处理。                                                                                                                                              
+                                                                                                                                                                                   
+  ### 4）其他系统异常                                                                                                                                                              
+                                                                                                                                                                                   
+  例如：                                                                                                                                                                           
+                                                                                                                                                                                   
+  - TypeError                                                                                                                                                                      
+  - RuntimeException                                                                                                                                                               
+  - 数据库异常                                                                                                                                                                     
+                                                                                                                                                                                   
+  也可以在 AppExceptionHandler 里统一兜底。                                                                                                                                        
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 方案 B 的处理范围更小                                                                                                                                                         
+                                                                                                                                                                                   
+  如果只有：                                                                                                                                                                       
+                                                                                                                                                                                   
+  BusinessExceptionHandler::class                                                                                                                                                  
+                                                                                                                                                                                   
+  那通常只会处理：                                                                                                                                                                 
+                                                                                                                                                                                   
+  throw new BusinessException(...)                                                                                                                                                 
+                                                                                                                                                                                   
+  像这些它一般不管：                                                                                                                                                               
+                                                                                                                                                                                   
+  - 404                                                                                                                                                                            
+  - 405                                                                                                                                                                            
+  - 路由异常                                                                                                                                                                       
+  - 参数绑定异常                                                                                                                                                                   
+  - TypeError                                                                                                                                                                      
+  - 数据库异常                                                                                                                                                                     
+  - 未知异常                                                                                                                                                                       
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 三、实际效果差异                                                                                                                                                               
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 如果你用方案 B                                                                                                                                                                
+                                                                                                                                                                                   
+  return [                                                                                                                                                                         
+      'handler' => [                                                                                                                                                               
+          'http' => [                                                                                                                                                              
+              App\Exception\Handler\BusinessExceptionHandler::class,                                                                                                               
+          ],                                                                                                                                                                       
+      ],                                                                                                                                                                           
+  ];                                                                                                                                                                               
+                                                                                                                                                                                   
+  当你抛：                                                                                                                                                                         
+                                                                                                                                                                                   
+  throw new BusinessException('用户不存在', 10001);                                                                                                                                
+                                                                                                                                                                                   
+  没问题，能正常返回业务 JSON。                                                                                                                                                    
+                                                                                                                                                                                   
+  但是如果访问一个不存在的路由：                                                                                                                                                   
+                                                                                                                                                                                   
+  GET /abc                                                                                                                                                                         
+                                                                                                                                                                                   
+  由于没有：                                                                                                                                                                       
+                                                                                                                                                                                   
+  HttpExceptionHandler::class                                                                                                                                                      
+                                                                                                                                                                                   
+  那 404 的表现可能就不是你想要的统一格式，甚至可能直接走默认异常输出。                                                                                                            
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 如果你用方案 A                                                                                                                                                                
+                                                                                                                                                                                   
+  return [                                                                                                                                                                         
+      'handler' => [                                                                                                                                                               
+          'http' => [                                                                                                                                                              
+              Hyperf\HttpServer\Exception\Handler\HttpExceptionHandler::class,                                                                                                     
+              App\Exception\Handler\AppExceptionHandler::class,                                                                                                                    
+          ],                                                                                                                                                                       
+      ],                                                                                                                                                                           
+  ];                                                                                                                                                                               
+                                                                                                                                                                                   
+  那么：                                                                                                                                                                           
+                                                                                                                                                                                   
+  - 404 有人处理                                                                                                                                                                   
+  - 405 有人处理                                                                                                                                                                   
+  - 业务异常有人处理                                                                                                                                                               
+  - 系统异常也可以兜底处理                                                                                                                                                         
+                                                                                                                                                                                   
+  更完整。                                                                                                                                                                         
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 四、我前面为什么写 BusinessExceptionHandler 单独版                                                                                                                             
+                                                                                                                                                                                   
+  因为当时我是在讲：                                                                                                                                                               
+                                                                                                                                                                                   
+  > “怎么封装业务异常”                                                                                                                                                             
+                                                                                                                                                                                   
+  所以为了聚焦主题，我给的是最小闭环版本：                                                                                                                                         
+                                                                                                                                                                                   
+  - BusinessException                                                                                                                                                              
+  - BusinessExceptionHandler                                                                                                                                                       
+                                                                                                                                                                                   
+  这套最适合用来说明：                                                                                                                                                             
+                                                                                                                                                                                   
+  > 业务异常怎么抛、怎么被统一接住、怎么返回 JSON                                                                                                                                  
+                                                                                                                                                                                   
+  它是一个 教学简化版，不是最完整的生产异常体系。                                                                                                                                  
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 五、生产项目里更推荐哪种                                                                                                                                                       
+                                                                                                                                                                                   
+  ## 更推荐方案 A 的思路                                                                                                                                                           
+                                                                                                                                                                                   
+  也就是：                                                                                                                                                                         
+                                                                                                                                                                                   
+  - HTTP 异常处理器                                                                                                                                                                
+  - 应用异常处理器                                                                                                                                                                 
+  - 业务异常处理器                                                                                                                                                                 
+  - 必要时还有参数校验异常处理器                                                                                                                                                   
+                                                                                                                                                                                   
+  一起组成异常处理链。                                                                                                                                                             
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 六、你可以怎么理解两者关系                                                                                                                                                     
+                                                                                                                                                                                   
+  ## BusinessExceptionHandler                                                                                                                                                      
+                                                                                                                                                                                   
+  更像是：                                                                                                                                                                         
+                                                                                                                                                                                   
+  > 专门处理“业务异常”的小处理器                                                                                                                                                   
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## AppExceptionHandler                                                                                                                                                           
+                                                                                                                                                                                   
+  更像是：                                                                                                                                                                         
+                                                                                                                                                                                   
+  > 应用级总异常处理器 / 兜底处理器                                                                                                                                                
+                                                                                                                                                                                   
+  通常它会处理：                                                                                                                                                                   
+                                                                                                                                                                                   
+  - BusinessException                                                                                                                                                              
+  - ValidationException                                                                                                                                                            
+  - Throwable                                                                                                                                                                      
+  - 未知异常                                                                                                                                                                       
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## HttpExceptionHandler                                                                                                                                                          
+                                                                                                                                                                                   
+  更像是：                                                                                                                                                                         
+                                                                                                                                                                                   
+  > 专门处理 HTTP 协议/路由层异常                                                                                                                                                  
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 七、一个更合理的企业版配置                                                                                                                                                     
+                                                                                                                                                                                   
+  例如：                                                                                                                                                                           
+                                                                                                                                                                                   
+  return [                                                                                                                                                                         
+      'handler' => [                                                                                                                                                               
+          'http' => [                                                                                                                                                              
+              App\Exception\Handler\BusinessExceptionHandler::class,                                                                                                               
+              Hyperf\HttpServer\Exception\Handler\HttpExceptionHandler::class,                                                                                                     
+              App\Exception\Handler\AppExceptionHandler::class,                                                                                                                    
+          ],                                                                                                                                                                       
+      ],                                                                                                                                                                           
+  ];                                                                                                                                                                               
+                                                                                                                                                                                   
+  含义是：                                                                                                                                                                         
+                                                                                                                                                                                   
+  1. 先处理业务异常                                                                                                                                                                
+  2. 再处理 HTTP 异常                                                                                                                                                              
+  3. 最后交给应用兜底异常处理器                                                                                                                                                    
+                                                                                                                                                                                   
+  当然，顺序可以按你的设计调整。                                                                                                                                                   
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 八、两种方式的优缺点                                                                                                                                                           
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 方案 B：只配 BusinessExceptionHandler                                                                                                                                         
+                                                                                                                                                                                   
+  ### 优点                                                                                                                                                                         
+                                                                                                                                                                                   
+  - 简单                                                                                                                                                                           
+  - 容易理解                                                                                                                                                                       
+  - 适合教学/小 demo                                                                                                                                                               
+  - 只关心业务异常时足够用                                                                                                                                                         
+                                                                                                                                                                                   
+  ### 缺点                                                                                                                                                                         
+                                                                                                                                                                                   
+  - 不完整                                                                                                                                                                         
+  - 404/405 不一定处理好                                                                                                                                                           
+  - 系统异常没统一兜底                                                                                                                                                             
+  - 生产项目通常不够                                                                                                                                                               
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 方案 A：HttpExceptionHandler + AppExceptionHandler                                                                                                                            
+                                                                                                                                                                                   
+  ### 优点                                                                                                                                                                         
+                                                                                                                                                                                   
+  - 更完整                                                                                                                                                                         
+  - HTTP 层异常有处理                                                                                                                                                              
+  - 业务异常可统一处理                                                                                                                                                             
+  - 系统异常可兜底                                                                                                                                                                 
+  - 更适合生产项目                                                                                                                                                                 
+                                                                                                                                                                                   
+  ### 缺点                                                                                                                                                                         
+                                                                                                                                                                                   
+  - 比单独 BusinessExceptionHandler 稍复杂                                                                                                                                         
+  - 需要你设计清楚各处理器职责和顺序                                                                                                                                               
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 九、推荐结论                                                                                                                                                                   
+                                                                                                                                                                                   
+  ## 如果是学习 / demo                                                                                                                                                             
+                                                                                                                                                                                   
+  你可以先用我前面那个：                                                                                                                                                           
+                                                                                                                                                                                   
+  return [                                                                                                                                                                         
+      'handler' => [                                                                                                                                                               
+          'http' => [                                                                                                                                                              
+              App\Exception\Handler\BusinessExceptionHandler::class,                                                                                                               
+          ],                                                                                                                                                                       
+      ],                                                                                                                                                                           
+  ];                                                                                                                                                                               
+                                                                                                                                                                                   
+  够理解“业务异常封装”了。                                                                                                                                                         
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 如果是正式项目                                                                                                                                                                
+                                                                                                                                                                                   
+  更推荐你用完整链路：                                                                                                                                                             
+                                                                                                                                                                                   
+  return [                                                                                                                                                                         
+      'handler' => [                                                                                                                                                               
+          'http' => [                                                                                                                                                              
+              Hyperf\HttpServer\Exception\Handler\HttpExceptionHandler::class,                                                                                                     
+              App\Exception\Handler\AppExceptionHandler::class,                                                                                                                    
+          ],                                                                                                                                                                       
+      ],                                                                                                                                                                           
+  ];                                                                                                                                                                               
+                                                                                                                                                                                   
+  或者更细化：                                                                                                                                                                     
+                                                                                                                                                                                   
+  return [                                                                                                                                                                         
+      'handler' => [                                                                                                                                                               
+          'http' => [                                                                                                                                                              
+              App\Exception\Handler\BusinessExceptionHandler::class,                                                                                                               
+              Hyperf\HttpServer\Exception\Handler\HttpExceptionHandler::class,                                                                                                     
+              App\Exception\Handler\AppExceptionHandler::class,                                                                                                                    
+          ],                                                                                                                                                                       
+      ],                                                                                                                                                                           
+  ];                                                                                                                                                                               
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 十、一句话总结                                                                                                                                                                 
+                                                                                                                                                                                   
+  ## 我前面的配置                                                                                                                                                                  
+                                                                                                                                                                                   
+  是 “专门处理业务异常的最小 demo”                                                                                                                                                 
+                                                                                                                                                                                   
+  ## 你现在这套配置                                                                                                                                                                
+                                                                                                                                                                                   
+  是 “更完整的 HTTP 应用异常处理链”                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  如果你要，我下一条可以继续直接给你：                                                                                                                                             
+                                                                                                                                                                                   
+  1. Hyperf 企业版推荐异常处理完整配置                                                                                                                                             
+  2. BusinessExceptionHandler + AppExceptionHandler + HttpExceptionHandler 三者职责拆解 demo                                                                                       
+  3. 统一异常返回格式完整代码
+
+# 1. Hyperf 企业版推荐异常处理完整配置                                                                                                                                           
+                                                                                                                                                                                   
+  推荐配置：                                                                                                                                                                       
+                                                                                                                                                                                   
+  config/autoload/exceptions.php                                                                                                                                                   
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  return [                                                                                                                                                                         
+      'handler' => [                                                                                                                                                               
+          'http' => [                                                                                                                                                              
+              App\Exception\Handler\BusinessExceptionHandler::class,                                                                                                               
+              Hyperf\HttpServer\Exception\Handler\HttpExceptionHandler::class,                                                                                                     
+              App\Exception\Handler\AppExceptionHandler::class,                                                                                                                    
+          ],                                                                                                                                                                       
+      ],                                                                                                                                                                           
+  ];                                                                                                                                                                               
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 为什么这样排                                                                                                                                                                  
+                                                                                                                                                                                   
+  ### 1）BusinessExceptionHandler                                                                                                                                                  
+                                                                                                                                                                                   
+  优先处理你自己定义的业务异常：                                                                                                                                                   
+                                                                                                                                                                                   
+  - 用户不存在                                                                                                                                                                     
+  - 库存不足                                                                                                                                                                       
+  - 重复提交                                                                                                                                                                       
+  - 权限不足                                                                                                                                                                       
+                                                                                                                                                                                   
+  ### 2）HttpExceptionHandler                                                                                                                                                      
+                                                                                                                                                                                   
+  处理 HTTP 层异常：                                                                                                                                                               
+                                                                                                                                                                                   
+  - 404                                                                                                                                                                            
+  - 405                                                                                                                                                                            
+  - 路由异常                                                                                                                                                                       
+                                                                                                                                                                                   
+  ### 3）AppExceptionHandler                                                                                                                                                       
+                                                                                                                                                                                   
+  最后兜底处理所有未被前面处理的异常：                                                                                                                                             
+                                                                                                                                                                                   
+  - Throwable                                                                                                                                                                      
+  - TypeError                                                                                                                                                                      
+  - 数据库异常                                                                                                                                                                     
+  - 未知系统异常                                                                                                                                                                   
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 2. 三个异常处理器职责拆解 demo                                                                                                                                                 
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 2.1 BusinessExceptionHandler                                                                                                                                                  
+                                                                                                                                                                                   
+  文件：app/Exception/Handler/BusinessExceptionHandler.php                                                                                                                         
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  namespace App\Exception\Handler;                                                                                                                                                 
+                                                                                                                                                                                   
+  use App\Exception\BusinessException;                                                                                                                                             
+  use Hyperf\ExceptionHandler\ExceptionHandler;                                                                                                                                    
+  use Hyperf\HttpServer\Contract\ResponseInterface as HttpResponse;                                                                                                                
+  use Psr\Http\Message\ResponseInterface;                                                                                                                                          
+  use Throwable;                                                                                                                                                                   
+                                                                                                                                                                                   
+  class BusinessExceptionHandler extends ExceptionHandler                                                                                                                          
+  {                                                                                                                                                                                
+      public function __construct(                                                                                                                                                 
+          protected HttpResponse $response                                                                                                                                         
+      ) {                                                                                                                                                                          
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      public function handle(Throwable $throwable, ResponseInterface $response)                                                                                                    
+      {                                                                                                                                                                            
+          if ($throwable instanceof BusinessException) {                                                                                                                           
+              return $this->response->json([                                                                                                                                       
+                  'code' => $throwable->getCode(),                                                                                                                                 
+                  'message' => $throwable->getMessage(),                                                                                                                           
+                  'data' => null,                                                                                                                                                  
+              ]);                                                                                                                                                                  
+          }                                                                                                                                                                        
+                                                                                                                                                                                   
+          return $response;                                                                                                                                                        
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      public function isValid(Throwable $throwable): bool                                                                                                                          
+      {                                                                                                                                                                            
+          return $throwable instanceof BusinessException;                                                                                                                          
+      }                                                                                                                                                                            
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ### 职责                                                                                                                                                                         
+                                                                                                                                                                                   
+  只处理：                                                                                                                                                                         
+                                                                                                                                                                                   
+  BusinessException                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 2.2 HttpExceptionHandler                                                                                                                                                      
+                                                                                                                                                                                   
+  这个通常直接用框架提供的：                                                                                                                                                       
+                                                                                                                                                                                   
+  Hyperf\HttpServer\Exception\Handler\HttpExceptionHandler::class                                                                                                                  
+                                                                                                                                                                                   
+  ### 职责                                                                                                                                                                         
+                                                                                                                                                                                   
+  处理：                                                                                                                                                                           
+                                                                                                                                                                                   
+  - 404 Not Found                                                                                                                                                                  
+  - 405 Method Not Allowed                                                                                                                                                         
+  - 其他 HTTP 异常                                                                                                                                                                 
+                                                                                                                                                                                   
+  一般不需要你自己重写，除非你想定制 404/405 返回格式。                                                                                                                            
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 2.3 AppExceptionHandler                                                                                                                                                       
+                                                                                                                                                                                   
+  文件：app/Exception/Handler/AppExceptionHandler.php                                                                                                                              
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  namespace App\Exception\Handler;                                                                                                                                                 
+                                                                                                                                                                                   
+  use Hyperf\ExceptionHandler\ExceptionHandler;                                                                                                                                    
+  use Hyperf\HttpServer\Contract\ResponseInterface as HttpResponse;                                                                                                                
+  use Psr\Http\Message\ResponseInterface;                                                                                                                                          
+  use Throwable;                                                                                                                                                                   
+                                                                                                                                                                                   
+  class AppExceptionHandler extends ExceptionHandler                                                                                                                               
+  {                                                                                                                                                                                
+      public function __construct(                                                                                                                                                 
+          protected HttpResponse $response                                                                                                                                         
+      ) {                                                                                                                                                                          
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      public function handle(Throwable $throwable, ResponseInterface $response)                                                                                                    
+      {                                                                                                                                                                            
+          // 这里可以记录系统异常日志                                                                                                                                              
+          // logger()->error($throwable->getMessage(), ['exception' => $throwable]);                                                                                               
+                                                                                                                                                                                   
+          return $this->response->json([                                                                                                                                           
+              'code' => 500,                                                                                                                                                       
+              'message' => '服务器内部错误',                                                                                                                                       
+              'data' => null,                                                                                                                                                      
+          ]);                                                                                                                                                                      
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      public function isValid(Throwable $throwable): bool                                                                                                                          
+      {                                                                                                                                                                            
+          // 兜底处理所有异常                                                                                                                                                      
+          return true;                                                                                                                                                             
+      }                                                                                                                                                                            
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ### 职责                                                                                                                                                                         
+                                                                                                                                                                                   
+  兜底处理所有前面没处理掉的异常。                                                                                                                                                 
+                                                                                                                                                                                   
+  例如：                                                                                                                                                                           
+                                                                                                                                                                                   
+  - TypeError                                                                                                                                                                      
+  - RuntimeException                                                                                                                                                               
+  - SQL 异常                                                                                                                                                                       
+  - 未知错误                                                                                                                                                                       
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 3. 统一异常返回格式完整代码                                                                                                                                                    
+                                                                                                                                                                                   
+  为了让所有异常都统一成这种格式：                                                                                                                                                 
+                                                                                                                                                                                   
+  {                                                                                                                                                                                
+    "code": 10001,                                                                                                                                                                 
+    "message": "用户不存在",                                                                                                                                                       
+    "data": null                                                                                                                                                                   
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  建议配合这几部分一起用。                                                                                                                                                         
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 3.1 ErrorCode                                                                                                                                                                 
+                                                                                                                                                                                   
+  文件：app/Constants/ErrorCode.php                                                                                                                                                
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  namespace App\Constants;                                                                                                                                                         
+                                                                                                                                                                                   
+  use Hyperf\Constants\AbstractConstants;                                                                                                                                          
+  use Hyperf\Constants\Annotation\Constants;                                                                                                                                       
+                                                                                                                                                                                   
+  #[Constants]                                                                                                                                                                     
+  class ErrorCode extends AbstractConstants                                                                                                                                        
+  {                                                                                                                                                                                
+      /**                                                                                                                                                                          
+       * @Message("成功")                                                                                                                                                          
+       */                                                                                                                                                                          
+      public const SUCCESS = 0;                                                                                                                                                    
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * @Message("服务器内部错误")                                                                                                                                                
+       */                                                                                                                                                                          
+      public const SERVER_ERROR = 500;                                                                                                                                             
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * @Message("用户不存在")                                                                                                                                                    
+       */                                                                                                                                                                          
+      public const USER_NOT_FOUND = 10001;                                                                                                                                         
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * @Message("库存不足")                                                                                                                                                      
+       */                                                                                                                                                                          
+      public const STOCK_NOT_ENOUGH = 10002;                                                                                                                                       
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * @Message("重复提交订单")                                                                                                                                                  
+       */                                                                                                                                                                          
+      public const ORDER_REPEAT_SUBMIT = 10003;                                                                                                                                    
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * @Message("参数错误")                                                                                                                                                      
+       */                                                                                                                                                                          
+      public const PARAM_INVALID = 10004;                                                                                                                                          
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 3.2 BusinessException                                                                                                                                                         
+                                                                                                                                                                                   
+  文件：app/Exception/BusinessException.php                                                                                                                                        
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  namespace App\Exception;                                                                                                                                                         
+                                                                                                                                                                                   
+  use App\Constants\ErrorCode;                                                                                                                                                     
+  use Hyperf\Server\Exception\ServerException;                                                                                                                                     
+  use Throwable;                                                                                                                                                                   
+                                                                                                                                                                                   
+  class BusinessException extends ServerException                                                                                                                                  
+  {                                                                                                                                                                                
+      public function __construct(int $code = 0, ?string $message = null, ?Throwable $previous = null)                                                                             
+      {                                                                                                                                                                            
+          if ($message === null) {                                                                                                                                                 
+              $message = ErrorCode::getMessage($code);                                                                                                                             
+          }                                                                                                                                                                        
+                                                                                                                                                                                   
+          parent::__construct($message, $code, $previous);                                                                                                                         
+      }                                                                                                                                                                            
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 3.3 业务 Service 示例                                                                                                                                                         
+                                                                                                                                                                                   
+  文件：app/Service/UserService.php                                                                                                                                                
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  namespace App\Service;                                                                                                                                                           
+                                                                                                                                                                                   
+  use App\Constants\ErrorCode;                                                                                                                                                     
+  use App\Exception\BusinessException;                                                                                                                                             
+                                                                                                                                                                                   
+  class UserService                                                                                                                                                                
+  {                                                                                                                                                                                
+      public function getUserInfo(int $id): array                                                                                                                                  
+      {                                                                                                                                                                            
+          if ($id !== 1) {                                                                                                                                                         
+              throw new BusinessException(ErrorCode::USER_NOT_FOUND);                                                                                                              
+          }                                                                                                                                                                        
+                                                                                                                                                                                   
+          return [                                                                                                                                                                 
+              'id' => 1,                                                                                                                                                           
+              'name' => '张三',                                                                                                                                                    
+              'email' => 'zhangsan@example.com',                                                                                                                                   
+          ];                                                                                                                                                                       
+      }                                                                                                                                                                            
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 3.4 Controller 示例                                                                                                                                                           
+                                                                                                                                                                                   
+  文件：app/Controller/UserController.php                                                                                                                                          
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  namespace App\Controller;                                                                                                                                                        
+                                                                                                                                                                                   
+  use App\Constants\ErrorCode;                                                                                                                                                     
+  use App\Service\UserService;                                                                                                                                                     
+  use Hyperf\HttpServer\Annotation\Controller;                                                                                                                                     
+  use Hyperf\HttpServer\Annotation\GetMapping;                                                                                                                                     
+                                                                                                                                                                                   
+  #[Controller(prefix: 'user')]                                                                                                                                                    
+  class UserController                                                                                                                                                             
+  {                                                                                                                                                                                
+      public function __construct(                                                                                                                                                 
+          protected UserService $userService                                                                                                                                       
+      ) {                                                                                                                                                                          
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      #[GetMapping('info')]                                                                                                                                                        
+      public function info(): array                                                                                                                                                
+      {                                                                                                                                                                            
+          $user = $this->userService->getUserInfo(2);                                                                                                                              
+                                                                                                                                                                                   
+          return [                                                                                                                                                                 
+              'code' => ErrorCode::SUCCESS,                                                                                                                                        
+              'message' => 'success',                                                                                                                                              
+              'data' => $user,                                                                                                                                                     
+          ];                                                                                                                                                                       
+      }                                                                                                                                                                            
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 4. 完整执行流程                                                                                                                                                                
+                                                                                                                                                                                   
+  当请求：                                                                                                                                                                         
+                                                                                                                                                                                   
+  GET /user/info                                                                                                                                                                   
+                                                                                                                                                                                   
+  执行到：                                                                                                                                                                         
+                                                                                                                                                                                   
+  throw new BusinessException(ErrorCode::USER_NOT_FOUND);                                                                                                                          
+                                                                                                                                                                                   
+  流程如下：                                                                                                                                                                       
+                                                                                                                                                                                   
+  UserService 抛出 BusinessException                                                                                                                                               
+      ↓                                                                                                                                                                            
+  BusinessExceptionHandler 判断可处理                                                                                                                                              
+      ↓                                                                                                                                                                            
+  返回统一 JSON                                                                                                                                                                    
+                                                                                                                                                                                   
+  如果请求的是不存在的路由：                                                                                                                                                       
+                                                                                                                                                                                   
+  GET /not-found                                                                                                                                                                   
+                                                                                                                                                                                   
+  流程：                                                                                                                                                                           
+                                                                                                                                                                                   
+  路由层抛 HttpException                                                                                                                                                           
+      ↓                                                                                                                                                                            
+  HttpExceptionHandler 处理                                                                                                                                                        
+                                                                                                                                                                                   
+  如果程序里出现未知异常：                                                                                                                                                         
+                                                                                                                                                                                   
+  1 / 0                                                                                                                                                                            
+                                                                                                                                                                                   
+  或者：                                                                                                                                                                           
+                                                                                                                                                                                   
+  null->abc()                                                                                                                                                                      
+                                                                                                                                                                                   
+  流程：                                                                                                                                                                           
+                                                                                                                                                                                   
+  前两个处理器都不处理                                                                                                                                                             
+      ↓                                                                                                                                                                            
+  AppExceptionHandler 兜底处理                                                                                                                                                     
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 5. 推荐企业版最终结构                                                                                                                                                          
+                                                                                                                                                                                   
+  建议你正式项目按这个分工：                                                                                                                                                       
+                                                                                                                                                                                   
+  ## BusinessException                                                                                                                                                             
+                                                                                                                                                                                   
+  处理业务异常对象本身                                                                                                                                                             
+                                                                                                                                                                                   
+  ## BusinessExceptionHandler                                                                                                                                                      
+                                                                                                                                                                                   
+  处理业务异常 JSON 返回                                                                                                                                                           
+                                                                                                                                                                                   
+  ## HttpExceptionHandler                                                                                                                                                          
+                                                                                                                                                                                   
+  处理 HTTP 路由层异常                                                                                                                                                             
+                                                                                                                                                                                   
+  ## AppExceptionHandler                                                                                                                                                           
+                                                                                                                                                                                   
+  处理所有未捕获系统异常                                                                                                                                                           
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 6. 最终推荐结论                                                                                                                                                                
+                                                                                                                                                                                   
+  如果是正式项目，我推荐你用这套：                                                                                                                                                 
+                                                                                                                                                                                   
+  return [                                                                                                                                                                         
+      'handler' => [                                                                                                                                                               
+          'http' => [                                                                                                                                                              
+              App\Exception\Handler\BusinessExceptionHandler::class,                                                                                                               
+              Hyperf\HttpServer\Exception\Handler\HttpExceptionHandler::class,                                                                                                     
+              App\Exception\Handler\AppExceptionHandler::class,                                                                                                                    
+          ],                                                                                                                                                                       
+      ],                                                                                                                                                                           
+  ];                                                                                                                                                                               
+                                                                                                                                                                                   
+  它的好处是：                                                                                                                                                                     
+                                                                                                                                                                                   
+  - 职责清晰                                                                                                                                                                       
+  - 业务异常独立                                                                                                                                                                   
+  - 路由异常独立                                                                                                                                                                   
+  - 系统异常兜底                                                                                                                                                                   
+  - 返回格式可统一                                                                                                                                                                 
+  - 适合中大型项目
