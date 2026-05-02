@@ -17,7 +17,7 @@ use Psr\Http\Message\ServerRequestInterface;
 class IdempotentAspect extends AbstractAspect
 {
     /**
-     * 按注解切入
+     * 按自定义注解切入
      */
     public array $annotations = [
         Idempotent::class,
@@ -33,7 +33,6 @@ class IdempotentAspect extends AbstractAspect
         $className = $proceedingJoinPoint->className;
         $methodName = $proceedingJoinPoint->methodName;
 
-        // 反射当前方法，读取注解
         $reflectionMethod = ReflectionManager::reflectMethod($className, $methodName);
         $attributes = $reflectionMethod->getAttributes(Idempotent::class);
 
@@ -44,7 +43,6 @@ class IdempotentAspect extends AbstractAspect
         /** @var Idempotent $annotation */
         $annotation = $attributes[0]->newInstance();
 
-        // 获取当前请求对象
         /** @var ServerRequestInterface|null $request */
         $request = Context::get(ServerRequestInterface::class);
 
@@ -52,7 +50,6 @@ class IdempotentAspect extends AbstractAspect
             return $proceedingJoinPoint->process();
         }
 
-        // 从请求头中获取幂等标识
         $idempotencyKey = $request->getHeaderLine('Idempotency-Key');
 
         if ($idempotencyKey === '') {
@@ -63,7 +60,6 @@ class IdempotentAspect extends AbstractAspect
             ];
         }
 
-        // 生成 Redis 幂等 key
         $redisKey = sprintf(
             '%s:%s:%s',
             $annotation->prefix,
@@ -71,8 +67,14 @@ class IdempotentAspect extends AbstractAspect
             $idempotencyKey
         );
 
-        // 如果 key 已存在，说明重复请求
-        if ($this->redisService->exists($redisKey)) {
+        // 原子幂等校验：SET key value NX EX ttl
+        $success = $this->redisService->getClient()->set(
+            $redisKey,
+            1,
+            ['nx', 'ex' => $annotation->ttl]
+        );
+
+        if (! $success) {
             return [
                 'code' => 409,
                 'message' => '重复请求，请勿重复提交',
@@ -80,10 +82,6 @@ class IdempotentAspect extends AbstractAspect
             ];
         }
 
-        // 写入 Redis，设置 TTL
-        $this->redisService->set($redisKey, 1, $annotation->ttl);
-
-        // 执行业务方法
         return $proceedingJoinPoint->process();
     }
 }
