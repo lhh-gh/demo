@@ -8457,3 +8457,1526 @@ return [
   - destroy                                                                                                                                                                        
                                                                                                                                                                                    
   ———
+
+# 三、Service 层用 interface 的典型写法                                                                                                                                          
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 1）接口                                                                                                                                                                       
+                                                                                                                                                                                   
+  文件：app/Service/DemoArticleServiceInterface.php                                                                                                                                
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  namespace App\Service;                                                                                                                                                           
+                                                                                                                                                                                   
+  interface DemoArticleServiceInterface                                                                                                                                            
+  {                                                                                                                                                                                
+      public function getList(): array;                                                                                                                                            
+                                                                                                                                                                                   
+      public function getDetail(int $id): ?array;                                                                                                                                  
+                                                                                                                                                                                   
+      public function create(string $title, string $content, string $author, int $status = 1): array;                                                                              
+                                                                                                                                                                                   
+      public function update(int $id, string $title, string $content, string $author, int $status): bool;                                                                          
+                                                                                                                                                                                   
+      public function delete(int $id): bool;                                                                                                                                       
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 2）实现类                                                                                                                                                                     
+                                                                                                                                                                                   
+  文件：app/Service/DemoArticleService.php                                                                                                                                         
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  namespace App\Service;                                                                                                                                                           
+                                                                                                                                                                                   
+  use App\Repository\DemoArticleRepositoryInterface;                                                                                                                               
+                                                                                                                                                                                   
+  class DemoArticleService implements DemoArticleServiceInterface                                                                                                                  
+  {                                                                                                                                                                                
+      public function __construct(                                                                                                                                                 
+          protected DemoArticleRepositoryInterface $repository                                                                                                                     
+      ) {                                                                                                                                                                          
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      public function getList(): array                                                                                                                                             
+      {                                                                                                                                                                            
+          return $this->repository->getAll();                                                                                                                                      
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      public function getDetail(int $id): ?array                                                                                                                                   
+      {                                                                                                                                                                            
+          $article = $this->repository->findById($id);                                                                                                                             
+                                                                                                                                                                                   
+          return $article?->toArray();                                                                                                                                             
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      public function create(string $title, string $content, string $author, int $status = 1): array                                                                               
+      {                                                                                                                                                                            
+          $article = $this->repository->create([                                                                                                                                   
+              'title' => $title,                                                                                                                                                   
+              'content' => $content,                                                                                                                                               
+              'author' => $author,                                                                                                                                                 
+              'status' => $status,                                                                                                                                                 
+              'created_at' => date('Y-m-d H:i:s'),                                                                                                                                 
+              'updated_at' => date('Y-m-d H:i:s'),                                                                                                                                 
+          ]);                                                                                                                                                                      
+                                                                                                                                                                                   
+          return $article->toArray();                                                                                                                                              
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      public function update(int $id, string $title, string $content, string $author, int $status): bool                                                                           
+      {                                                                                                                                                                            
+          return $this->repository->updateById($id, [                                                                                                                              
+              'title' => $title,                                                                                                                                                   
+              'content' => $content,                                                                                                                                               
+              'author' => $author,                                                                                                                                                 
+              'status' => $status,                                                                                                                                                 
+              'updated_at' => date('Y-m-d H:i:s'),                                                                                                                                 
+          ]);                                                                                                                                                                      
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      public function delete(int $id): bool                                                                                                                                        
+      {                                                                                                                                                                            
+          return $this->repository->deleteById($id);                                                                                                                               
+      }                                                                                                                                                                            
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 四、Repository 层用 interface 的典型写法                                                                                                                                       
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 1）接口                                                                                                                                                                       
+                                                                                                                                                                                   
+  文件：app/Repository/DemoArticleRepositoryInterface.php                                                                                                                          
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  namespace App\Repository;                                                                                                                                                        
+                                                                                                                                                                                   
+  use App\Model\DemoArticle;                                                                                                                                                       
+                                                                                                                                                                                   
+  interface DemoArticleRepositoryInterface                                                                                                                                         
+  {                                                                                                                                                                                
+      public function getAll(): array;                                                                                                                                             
+                                                                                                                                                                                   
+      public function findById(int $id): ?DemoArticle;                                                                                                                             
+                                                                                                                                                                                   
+      public function create(array $data): DemoArticle;                                                                                                                            
+                                                                                                                                                                                   
+      public function updateById(int $id, array $data): bool;                                                                                                                      
+                                                                                                                                                                                   
+      public function deleteById(int $id): bool;                                                                                                                                   
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 2）实现类                                                                                                                                                                     
+                                                                                                                                                                                   
+  文件：app/Repository/DemoArticleRepository.php                                                                                                                                   
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  namespace App\Repository;                                                                                                                                                        
+                                                                                                                                                                                   
+  use App\Model\DemoArticle;                                                                                                                                                       
+                                                                                                                                                                                   
+  class DemoArticleRepository implements DemoArticleRepositoryInterface                                                                                                            
+  {                                                                                                                                                                                
+      public function getAll(): array                                                                                                                                              
+      {                                                                                                                                                                            
+          return DemoArticle::query()                                                                                                                                              
+              ->orderByDesc('id')                                                                                                                                                  
+              ->get()                                                                                                                                                              
+              ->toArray();                                                                                                                                                         
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      public function findById(int $id): ?DemoArticle                                                                                                                              
+      {                                                                                                                                                                            
+          return DemoArticle::query()->find($id);                                                                                                                                  
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      public function create(array $data): DemoArticle                                                                                                                             
+      {                                                                                                                                                                            
+          return DemoArticle::query()->create($data);                                                                                                                              
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      public function updateById(int $id, array $data): bool                                                                                                                       
+      {                                                                                                                                                                            
+          return (bool) DemoArticle::query()                                                                                                                                       
+              ->where('id', $id)                                                                                                                                                   
+              ->update($data);                                                                                                                                                     
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      public function deleteById(int $id): bool                                                                                                                                    
+      {                                                                                                                                                                            
+          return (bool) DemoArticle::query()                                                                                                                                       
+              ->where('id', $id)                                                                                                                                                   
+              ->delete();                                                                                                                                                          
+      }                                                                                                                                                                            
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 五、依赖绑定                                                                                                                                                                   
+                                                                                                                                                                                   
+  用了 interface 后，Hyperf 容器不知道接口对应哪个实现，所以要绑定。                                                                                                               
+                                                                                                                                                                                   
+  文件：config/autoload/dependencies.php                                                                                                                                           
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  return [                                                                                                                                                                         
+      App\Service\DemoArticleServiceInterface::class => App\Service\DemoArticleService::class,                                                                                     
+      App\Repository\DemoArticleRepositoryInterface::class => App\Repository\DemoArticleRepository::class,                                                                         
+  ];                                                                                                                                                                               
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 六、Controller 里怎么用                                                                                                                                                        
+                                                                                                                                                                                   
+  文件：app/Controller/ArticleController.php                                                                                                                                       
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  namespace App\Controller;                                                                                                                                                        
+                                                                                                                                                                                   
+  use App\Service\DemoArticleServiceInterface;                                                                                                                                     
+  use Hyperf\HttpServer\Annotation\Controller;                                                                                                                                     
+  use Hyperf\HttpServer\Annotation\GetMapping;                                                                                                                                     
+                                                                                                                                                                                   
+  #[Controller(prefix: 'articles')]                                                                                                                                                
+  class ArticleController                                                                                                                                                          
+  {                                                                                                                                                                                
+      public function __construct(                                                                                                                                                 
+          protected DemoArticleServiceInterface $service                                                                                                                           
+      ) {                                                                                                                                                                          
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      #[GetMapping('')]                                                                                                                                                            
+      public function index(): array                                                                                                                                               
+      {                                                                                                                                                                            
+          return [                                                                                                                                                                 
+              'code' => 0,                                                                                                                                                         
+              'message' => 'success',                                                                                                                                              
+              'data' => $this->service->getList(),                                                                                                                                 
+          ];                                                                                                                                                                       
+      }                                                                                                                                                                            
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 七、优点                                                                                                                                                                       
+                                                                                                                                                                                   
+  ## 1）解耦                                                                                                                                                                       
+                                                                                                                                                                                   
+  Controller 不关心具体实现类，只关心“能力”。                                                                                                                                      
+                                                                                                                                                                                   
+  ## 2）方便替换实现                                                                                                                                                               
+                                                                                                                                                                                   
+  例如 Repository 从 MySQL 换成 ES，不影响上层调用。                                                                                                                               
+                                                                                                                                                                                   
+  ## 3）方便测试                                                                                                                                                                   
+                                                                                                                                                                                   
+  可以轻松 mock interface。                                                                                                                                                        
+                                                                                                                                                                                   
+  ## 4）结构统一                                                                                                                                                                   
+                                                                                                                                                                                   
+  大团队更容易协作。                                                                                                                                                               
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 八、缺点                                                                                                                                                                       
+                                                                                                                                                                                   
+  ## 1）文件变多                                                                                                                                                                   
+                                                                                                                                                                                   
+  本来一个类，现在变成：                                                                                                                                                           
+                                                                                                                                                                                   
+  - interface                                                                                                                                                                      
+  - implementation                                                                                                                                                                 
+                                                                                                                                                                                   
+  项目会更“重”。                                                                                                                                                                   
+                                                                                                                                                                                   
+  ## 2）简单项目会显得啰嗦                                                                                                                                                         
+                                                                                                                                                                                   
+  如果永远只有一个实现，且项目不大，可能有点过度设计。                                                                                                                             
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 九、企业里怎么选                                                                                                                                                               
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 推荐用 interface 的情况                                                                                                                                                       
+                                                                                                                                                                                   
+  - 中大型项目                                                                                                                                                                     
+  - 多人协作                                                                                                                                                                       
+  - 有替换实现可能                                                                                                                                                                 
+  - 需要测试 mock                                                                                                                                                                  
+  - 架构规范要求强                                                                                                                                                                 
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 可以不用 interface 的情况                                                                                                                                                     
+                                                                                                                                                                                   
+  - 小项目                                                                                                                                                                         
+  - demo                                                                                                                                                                           
+  - 单人开发                                                                                                                                                                       
+  - 业务很简单                                                                                                                                                                     
+  - 不考虑替换实现                                                                                                                                                                 
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 十、一句话结论                                                                                                                                                                 
+                                                                                                                                                                                   
+  ## 会不会用 interface？                                                                                                                                                          
+                                                                                                                                                                                   
+  会。                                                                                                                                                                             
+                                                                                                                                                                                   
+  ## 是不是必须？                                                                                                                                                                  
+                                                                                                                                                                                   
+  不是。                                                                                                                                                                           
+                                                                                                                                                                                   
+  ## 什么时候最值得用？                                                                                                                                                            
+                                                                                                                                                                                   
+  当你需要：                                                                                                                                                                       
+                                                                                                                                                                                   
+  - 解耦                                                                                                                                                                           
+  - 多实现                                                                                                                                                                         
+  - 测试替身                                                                                                                                                                       
+  - 统一规范                                                                                                                                                                       
+                                                                                                                                                                                   
+  时就很值得。
+
+
+return [                                                                                                                                                                         
+      App\Service\DemoArticleServiceInterface::class => App\Service\DemoArticleService::class,                                                                                     
+      App\Repository\DemoArticleRepositoryInterface::class => App\Repository\DemoArticleRepository::class,                                                                         
+  ];                                                                                                                                                                               
+                                                                                                                                                                                   
+  表示：                                                                                                                                                                           
+                                                                                                                                                                                   
+  > 接口 => 实现类                                                                                                                                                                 
+                                                                                                                                                                                   
+  这是 基础绑定方式。                                                                                                                                                              
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 1. 最常见：接口绑定实现类                                                                                                                                                      
+                                                                                                                                                                                   
+  return [                                                                                                                                                                         
+      DemoArticleServiceInterface::class => DemoArticleService::class,                                                                                                             
+  ];                                                                                                                                                                               
+                                                                                                                                                                                   
+  适合：                                                                                                                                                                           
+                                                                                                                                                                                   
+  - 一个接口对应一个实现                                                                                                                                                           
+  - 最简单                                                                                                                                                                         
+  - 最常用                                                                                                                                                                         
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 2. 也可以绑定闭包                                                                                                                                                              
+                                                                                                                                                                                   
+  如果你的对象创建比较复杂，可以这样：                                                                                                                                             
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  use Psr\Container\ContainerInterface;                                                                                                                                            
+  use App\Service\DemoArticleServiceInterface;                                                                                                                                     
+  use App\Service\DemoArticleService;                                                                                                                                              
+  use App\Repository\DemoArticleRepositoryInterface;                                                                                                                               
+                                                                                                                                                                                   
+  return [                                                                                                                                                                         
+      DemoArticleServiceInterface::class => function (ContainerInterface $container) {                                                                                             
+          return new DemoArticleService(                                                                                                                                           
+              $container->get(DemoArticleRepositoryInterface::class)                                                                                                               
+          );                                                                                                                                                                       
+      },                                                                                                                                                                           
+  ];                                                                                                                                                                               
+                                                                                                                                                                                   
+  适合：                                                                                                                                                                           
+                                                                                                                                                                                   
+  - 创建对象时需要自定义逻辑                                                                                                                                                       
+  - 构造过程不只是简单 new                                                                                                                                                         
+  - 需要手动拼装依赖                                                                                                                                                               
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 3. 也可以绑定匿名工厂类/工厂                                                                                                                                                   
+                                                                                                                                                                                   
+  例如：                                                                                                                                                                           
+                                                                                                                                                                                   
+  return [                                                                                                                                                                         
+      DemoArticleServiceInterface::class => DemoArticleServiceFactory::class,                                                                                                      
+  ];                                                                                                                                                                               
+                                                                                                                                                                                   
+  然后工厂类里自己控制创建逻辑。                                                                                                                                                   
+                                                                                                                                                                                   
+  适合：                                                                                                                                                                           
+                                                                                                                                                                                   
+  - 对象创建逻辑复杂                                                                                                                                                               
+  - 需要统一工厂管理                                                                                                                                                               
+  - 企业项目里比较常见                                                                                                                                                             
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 4. 也可以不绑定接口，直接注入具体类                                                                                                                                            
+                                                                                                                                                                                   
+  如果你不用接口，直接这样：                                                                                                                                                       
+                                                                                                                                                                                   
+  public function __construct(                                                                                                                                                     
+      protected DemoArticleService $service                                                                                                                                        
+  ) {                                                                                                                                                                              
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  那通常 不需要 dependencies 绑定。                                                                                                                                                
+                                                                                                                                                                                   
+  因为容器可以直接实例化具体类。                                                                                                                                                   
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 5. 也可以做“接口 => 另一个抽象层”的间接绑定                                                                                                                                    
+                                                                                                                                                                                   
+  例如：                                                                                                                                                                           
+                                                                                                                                                                                   
+  return [                                                                                                                                                                         
+      DemoArticleServiceInterface::class => DemoArticleService::class,                                                                                                             
+      DemoArticleRepositoryInterface::class => MysqlDemoArticleRepository::class,                                                                                                  
+  ];                                                                                                                                                                               
+                                                                                                                                                                                   
+  后面你可以改成：                                                                                                                                                                 
+                                                                                                                                                                                   
+  return [                                                                                                                                                                         
+      DemoArticleRepositoryInterface::class => EsDemoArticleRepository::class,                                                                                                     
+  ];                                                                                                                                                                               
+                                                                                                                                                                                   
+  这就是依赖绑定最大的价值之一：替换实现不用改调用方。                                                                                                                             
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 6. 也可以按环境切换绑定                                                                                                                                                        
+                                                                                                                                                                                   
+  例如开发环境绑一个 mock 实现，生产环境绑真实实现：                                                                                                                               
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  use App\Repository\DemoArticleRepositoryInterface;                                                                                                                               
+  use App\Repository\DemoArticleRepository;                                                                                                                                        
+  use App\Repository\MockDemoArticleRepository;                                                                                                                                    
+                                                                                                                                                                                   
+  return [                                                                                                                                                                         
+      DemoArticleRepositoryInterface::class => env('APP_ENV') === 'local'                                                                                                          
+          ? MockDemoArticleRepository::class                                                                                                                                       
+          : DemoArticleRepository::class,                                                                                                                                          
+  ];                                                                                                                                                                               
+                                                                                                                                                                                   
+  适合：                                                                                                                                                                           
+                                                                                                                                                                                   
+  - 本地调试                                                                                                                                                                       
+  - 测试环境                                                                                                                                                                       
+  - 灰度切换                                                                                                                                                                       
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 7. 什么时候必须绑定                                                                                                                                                            
+                                                                                                                                                                                   
+  ## 必须绑定的情况                                                                                                                                                                
+                                                                                                                                                                                   
+  当你注入的是：                                                                                                                                                                   
+                                                                                                                                                                                   
+  DemoArticleServiceInterface                                                                                                                                                      
+  DemoArticleRepositoryInterface                                                                                                                                                   
+                                                                                                                                                                                   
+  这种接口时，通常必须绑定。                                                                                                                                                       
+  因为接口不能直接实例化。                                                                                                                                                         
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 不一定要绑定的情况                                                                                                                                                            
+                                                                                                                                                                                   
+  当你注入的是：                                                                                                                                                                   
+                                                                                                                                                                                   
+  DemoArticleService                                                                                                                                                               
+  DemoArticleRepository                                                                                                                                                            
+                                                                                                                                                                                   
+  这种具体类时，通常不需要绑定。                                                                                                                                                   
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 8. 一句话总结                                                                                                                                                                  
+                                                                                                                                                                                   
+  ## 你这种写法                                                                                                                                                                    
+                                                                                                                                                                                   
+  接口 => 实现类                                                                                                                                                                   
+                                                                                                                                                                                   
+  是最标准、最常用的依赖绑定方式。                                                                                                                                                 
+                                                                                                                                                                                   
+  ## 但不是唯一方式                                                                                                                                                                
+                                                                                                                                                                                   
+  还可以：                                                                                                                                                                         
+                                                                                                                                                                                   
+  - 绑定闭包                                                                                                                                                                       
+  - 绑定工厂类                                                                                                                                                                     
+  - 按环境动态绑定                                                                                                                                                                 
+  - 不用接口，直接注入具体类                                                                                                                                                       
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 9. 推荐结论                                                                                                                                                                    
+                                                                                                                                                                                   
+  如果你现在是普通业务开发，优先用这个就够了：                                                                                                                                     
+                                                                                                                                                                                   
+  return [                                                                                                                                                                         
+      App\Service\DemoArticleServiceInterface::class => App\Service\DemoArticleService::class,                                                                                     
+      App\Repository\DemoArticleRepositoryInterface::class => App\Repository\DemoArticleRepository::class,                                                                         
+  ];                                                                                                                                                                               
+                                                                                                                                                                                   
+  最清晰、最稳。                                                                                                                                                                   
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  如果你要，我可以继续给你补一份：                                                                                                                                                 
+                                                                                                                                                                                   
+  ## Hyperf dependencies.php 常见绑定方式大全                                                                                                                                      
+                                                                                                                                                                                   
+  包括：                                                                                                                                                                           
+                                                                                                                                                                                   
+  1. 接口绑定类                                                                                                                                                                    
+  2. 闭包绑定                                                                                                                                                                      
+  3. 工厂绑定                                                                                                                                                                      
+  4. 环境切换绑定                                                                                                                                                                  
+  5. 单例/共享对象说明
+
+# 模型缓存
+
+要熟悉企业项目里的模型缓存，不要一上来就背概念，最好按这条线练：                                                                                                                 
+                                                                                                                                                                                   
+  > 先会手写缓存读写 -> 再会“查库前查缓存” -> 再会“更新后删缓存” -> 再会列表缓存/热点缓存/一致性问题                                                                               
+                                                                                                                                                                                   
+  如果你是 Hyperf / Laravel / PHP 企业项目，这条路线都适用。                                                                                                                       
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 一、先理解“模型缓存”到底是什么                                                                                                                                                 
+                                                                                                                                                                                   
+  模型缓存本质就是：                                                                                                                                                               
+                                                                                                                                                                                   
+  > 把原本要查数据库的模型数据，先放到 Redis 之类缓存里，下次优先读缓存。                                                                                                          
+                                                                                                                                                                                   
+  例如原来：                                                                                                                                                                       
+                                                                                                                                                                                   
+  $user = User::query()->find($id);                                                                                                                                                
+                                                                                                                                                                                   
+  加缓存后变成：                                                                                                                                                                   
+                                                                                                                                                                                   
+  $key = "user:detail:{$id}";                                                                                                                                                      
+  $data = $redis->get($key);                                                                                                                                                       
+                                                                                                                                                                                   
+  if (! $data) {                                                                                                                                                                   
+      $user = User::query()->find($id);                                                                                                                                            
+      $redis->set($key, json_encode($user), 3600);                                                                                                                                 
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 二、企业项目里最常见的模型缓存场景                                                                                                                                             
+                                                                                                                                                                                   
+  先把这 4 类练熟，基本就够用了。                                                                                                                                                  
+                                                                                                                                                                                   
+  ## 1）详情缓存                                                                                                                                                                   
+                                                                                                                                                                                   
+  最常见：                                                                                                                                                                         
+                                                                                                                                                                                   
+  - 用户详情                                                                                                                                                                       
+  - 商品详情                                                                                                                                                                       
+  - 文章详情                                                                                                                                                                       
+  - 分类详情                                                                                                                                                                       
+                                                                                                                                                                                   
+  key 例子：                                                                                                                                                                       
+                                                                                                                                                                                   
+  user:detail:1001                                                                                                                                                                 
+  product:detail:2001                                                                                                                                                              
+  article:detail:3001                                                                                                                                                              
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 2）列表缓存                                                                                                                                                                   
+                                                                                                                                                                                   
+  例如：                                                                                                                                                                           
+                                                                                                                                                                                   
+  - 首页推荐商品                                                                                                                                                                   
+  - 分类文章列表                                                                                                                                                                   
+  - 热门文章列表                                                                                                                                                                   
+                                                                                                                                                                                   
+  key 例子：                                                                                                                                                                       
+                                                                                                                                                                                   
+  article:list:category:1:page:1                                                                                                                                                   
+  product:list:category:2:page:1                                                                                                                                                   
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 3）计数缓存                                                                                                                                                                   
+                                                                                                                                                                                   
+  例如：                                                                                                                                                                           
+                                                                                                                                                                                   
+  - 浏览量                                                                                                                                                                         
+  - 点赞数                                                                                                                                                                         
+  - 评论数                                                                                                                                                                         
+  - 库存快照                                                                                                                                                                       
+                                                                                                                                                                                   
+  key 例子：                                                                                                                                                                       
+                                                                                                                                                                                   
+  article:view_count:1001                                                                                                                                                          
+  product:sales_count:2001                                                                                                                                                         
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 4）热点数据缓存                                                                                                                                                               
+                                                                                                                                                                                   
+  例如：                                                                                                                                                                           
+                                                                                                                                                                                   
+  - 配置项                                                                                                                                                                         
+  - 导航菜单                                                                                                                                                                       
+  - Banner                                                                                                                                                                         
+  - 地区数据                                                                                                                                                                       
+                                                                                                                                                                                   
+  key 例子：                                                                                                                                                                       
+                                                                                                                                                                                   
+  system:config:site                                                                                                                                                               
+  home:banner:list                                                                                                                                                                 
+  region:province:list                                                                                                                                                             
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 三、企业项目里模型缓存的标准套路                                                                                                                                               
+                                                                                                                                                                                   
+  最常见就是这 3 种策略。                                                                                                                                                          
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 1）Cache Aside（旁路缓存）                                                                                                                                                    
+                                                                                                                                                                                   
+  这是最常用的。                                                                                                                                                                   
+                                                                                                                                                                                   
+  ### 读                                                                                                                                                                           
+                                                                                                                                                                                   
+  - 先查缓存                                                                                                                                                                       
+  - 没有再查库                                                                                                                                                                     
+  - 查到后写缓存                                                                                                                                                                   
+                                                                                                                                                                                   
+  ### 写                                                                                                                                                                           
+                                                                                                                                                                                   
+  - 先更新数据库                                                                                                                                                                   
+  - 再删除缓存                                                                                                                                                                     
+                                                                                                                                                                                   
+  这是企业项目默认首选。                                                                                                                                                           
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 2）只删缓存，不主动更新缓存                                                                                                                                                   
+                                                                                                                                                                                   
+  很多新手喜欢更新数据库后顺手更新缓存，但企业里更常见的是：                                                                                                                       
+                                                                                                                                                                                   
+  > 更新 DB 后删除缓存，而不是直接改缓存                                                                                                                                           
+                                                                                                                                                                                   
+  因为：                                                                                                                                                                           
+                                                                                                                                                                                   
+  - 简单                                                                                                                                                                           
+  - 不容易写错                                                                                                                                                                     
+  - 避免脏数据                                                                                                                                                                     
+  - 下次自然回源重建缓存                                                                                                                                                           
+                                                                                                                                                                                   
+  例如：                                                                                                                                                                           
+                                                                                                                                                                                   
+  DB更新成功                                                                                                                                                                       
+  -> del user:detail:1001                                                                                                                                                          
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 3）给缓存加 TTL                                                                                                                                                               
+                                                                                                                                                                                   
+  不要永久缓存详情，除非是非常稳定的配置数据。                                                                                                                                     
+                                                                                                                                                                                   
+  例如：                                                                                                                                                                           
+                                                                                                                                                                                   
+  - 用户详情：5 分钟 / 10 分钟                                                                                                                                                     
+  - 商品详情：10 分钟                                                                                                                                                              
+  - 配置数据：30 分钟 / 1 小时                                                                                                                                                     
+                                                                                                                                                                                   
+  这样即使删缓存漏了，也能自动过期。                                                                                                                                               
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 四、怎么一步一步练熟                                                                                                                                                           
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 第一阶段：先练详情缓存                                                                                                                                                        
+                                                                                                                                                                                   
+  先只练一个方法：                                                                                                                                                                 
+                                                                                                                                                                                   
+  getUserById($id)                                                                                                                                                                 
+                                                                                                                                                                                   
+  要求你会写：                                                                                                                                                                     
+                                                                                                                                                                                   
+  - 查缓存                                                                                                                                                                         
+  - 缓存没有查数据库                                                                                                                                                               
+  - 回填缓存                                                                                                                                                                       
+  - 更新后删缓存                                                                                                                                                                   
+                                                                                                                                                                                   
+  这个必须练到很顺。                                                                                                                                                               
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 第二阶段：练列表缓存                                                                                                                                                          
+                                                                                                                                                                                   
+  例如：                                                                                                                                                                           
+                                                                                                                                                                                   
+  getArticleList($categoryId, $page)                                                                                                                                               
+                                                                                                                                                                                   
+  这里重点练：                                                                                                                                                                     
+                                                                                                                                                                                   
+  - key 怎么设计                                                                                                                                                                   
+  - 条件组合怎么进 key                                                                                                                                                             
+  - 分页怎么缓存                                                                                                                                                                   
+  - 哪些列表适合缓存，哪些不适合                                                                                                                                                   
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 第三阶段：练更新一致性                                                                                                                                                        
+                                                                                                                                                                                   
+  例如：                                                                                                                                                                           
+                                                                                                                                                                                   
+  updateUser($id, $data)                                                                                                                                                           
+                                                                                                                                                                                   
+  你要能熟练写出：                                                                                                                                                                 
+                                                                                                                                                                                   
+  更新数据库                                                                                                                                                                       
+  删除详情缓存                                                                                                                                                                     
+  必要时删除相关列表缓存                                                                                                                                                           
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 第四阶段：练缓存穿透 / 击穿 / 雪崩                                                                                                                                            
+                                                                                                                                                                                   
+  企业项目一定会碰到这几个词。                                                                                                                                                     
+                                                                                                                                                                                   
+  你至少要会：                                                                                                                                                                     
+                                                                                                                                                                                   
+  - 空值缓存                                                                                                                                                                       
+  - 随机过期时间                                                                                                                                                                   
+  - 分布式锁重建缓存                                                                                                                                                               
+  - 热点 key 保护                                                                                                                                                                  
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 五、推荐你先掌握的代码结构                                                                                                                                                     
+                                                                                                                                                                                   
+  企业里最好不要在 Controller 里直接写缓存逻辑。                                                                                                                                   
+  推荐放在 Service 或 Repository 里。                                                                                                                                              
+                                                                                                                                                                                   
+  例如：                                                                                                                                                                           
+                                                                                                                                                                                   
+  Controller                                                                                                                                                                       
+    -> Service                                                                                                                                                                     
+        -> Repository                                                                                                                                                              
+        -> CacheService / RedisService                                                                                                                                             
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 推荐结构示例                                                                                                                                                                  
+                                                                                                                                                                                   
+  ### Service                                                                                                                                                                      
+                                                                                                                                                                                   
+  负责业务流程：                                                                                                                                                                   
+                                                                                                                                                                                   
+  public function getUserDetail(int $id): ?array                                                                                                                                   
+  {                                                                                                                                                                                
+      return $this->repository->getDetailWithCache($id);                                                                                                                           
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ### Repository                                                                                                                                                                   
+                                                                                                                                                                                   
+  负责查库 + 缓存策略：                                                                                                                                                            
+                                                                                                                                                                                   
+  public function getDetailWithCache(int $id): ?array                                                                                                                              
+  {                                                                                                                                                                                
+      $key = "user:detail:{$id}";                                                                                                                                                  
+      $cached = $this->redisService->get($key, true);                                                                                                                              
+                                                                                                                                                                                   
+      if ($cached) {                                                                                                                                                               
+          return $cached;                                                                                                                                                          
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      $user = User::query()->find($id);                                                                                                                                            
+      if (! $user) {                                                                                                                                                               
+          return null;                                                                                                                                                             
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      $data = $user->toArray();                                                                                                                                                    
+      $this->redisService->set($key, $data, 600);                                                                                                                                  
+                                                                                                                                                                                   
+      return $data;                                                                                                                                                                
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 六、企业项目里最重要的 5 个缓存原则                                                                                                                                            
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 1）先更 DB，再删缓存                                                                                                                                                          
+                                                                                                                                                                                   
+  最常见标准操作：                                                                                                                                                                 
+                                                                                                                                                                                   
+  update users set ...                                                                                                                                                             
+  delete redis key                                                                                                                                                                 
+                                                                                                                                                                                   
+  不要反过来。                                                                                                                                                                     
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 2）缓存 key 必须规范                                                                                                                                                          
+                                                                                                                                                                                   
+  例如：                                                                                                                                                                           
+                                                                                                                                                                                   
+  user:detail:{id}                                                                                                                                                                 
+  article:list:{categoryId}:{page}                                                                                                                                                 
+  product:detail:{id}                                                                                                                                                              
+                                                                                                                                                                                   
+  不要随便写：                                                                                                                                                                     
+                                                                                                                                                                                   
+  user1                                                                                                                                                                            
+  detail_1                                                                                                                                                                         
+  cache_xxx                                                                                                                                                                        
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 3）缓存值尽量是“结果数据”，不是整个模型对象                                                                                                                                   
+                                                                                                                                                                                   
+  一般缓存：                                                                                                                                                                       
+                                                                                                                                                                                   
+  - 数组                                                                                                                                                                           
+  - JSON                                                                                                                                                                           
+  - DTO                                                                                                                                                                            
+                                                                                                                                                                                   
+  不建议直接缓存复杂 ORM 对象。                                                                                                                                                    
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 4）缓存层只做“加速”，不能替代数据库真相                                                                                                                                       
+                                                                                                                                                                                   
+  数据库才是最终真相源。                                                                                                                                                           
+  缓存只是副本。                                                                                                                                                                   
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 5）列表缓存比详情缓存更难                                                                                                                                                     
+                                                                                                                                                                                   
+  因为列表涉及：                                                                                                                                                                   
+                                                                                                                                                                                   
+  - 条件                                                                                                                                                                           
+  - 排序                                                                                                                                                                           
+  - 分页                                                                                                                                                                           
+  - 多个关联数据                                                                                                                                                                   
+                                                                                                                                                                                   
+  所以新手先练详情缓存，不要先碰复杂列表。                                                                                                                                         
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 七、怎么才算“熟悉使用”                                                                                                                                                         
+                                                                                                                                                                                   
+  你做到下面这些，就算真的比较熟了：                                                                                                                                               
+                                                                                                                                                                                   
+  ## 1                                                                                                                                                                             
+                                                                                                                                                                                   
+  能独立写一个详情缓存：                                                                                                                                                           
+                                                                                                                                                                                   
+  - 查询缓存                                                                                                                                                                       
+  - 回源数据库                                                                                                                                                                     
+  - 回填缓存                                                                                                                                                                       
+  - 更新删缓存                                                                                                                                                                     
+                                                                                                                                                                                   
+  ## 2                                                                                                                                                                             
+                                                                                                                                                                                   
+  能独立设计缓存 key：                                                                                                                                                             
+                                                                                                                                                                                   
+  - 详情                                                                                                                                                                           
+  - 列表                                                                                                                                                                           
+  - 统计                                                                                                                                                                           
+  - 配置                                                                                                                                                                           
+                                                                                                                                                                                   
+  ## 3                                                                                                                                                                             
+                                                                                                                                                                                   
+  知道什么时候删哪些缓存：                                                                                                                                                         
+                                                                                                                                                                                   
+  - 更新详情删详情 key                                                                                                                                                             
+  - 更新内容删详情 key + 相关列表 key                                                                                                                                              
+                                                                                                                                                                                   
+  ## 4                                                                                                                                                                             
+                                                                                                                                                                                   
+  知道常见问题怎么处理：                                                                                                                                                           
+                                                                                                                                                                                   
+  - 穿透                                                                                                                                                                           
+  - 击穿                                                                                                                                                                           
+  - 雪崩                                                                                                                                                                           
+  - 脏数据                                                                                                                                                                         
+                                                                                                                                                                                   
+  ## 5                                                                                                                                                                             
+                                                                                                                                                                                   
+  知道哪些数据适合缓存，哪些不适合                                                                                                                                                 
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 八、怎么练最有效                                                                                                                                                               
+                                                                                                                                                                                   
+  我建议你按这 3 个 demo 练。                                                                                                                                                      
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## Demo 1：用户详情缓存                                                                                                                                                          
+                                                                                                                                                                                   
+  练：                                                                                                                                                                             
+                                                                                                                                                                                   
+  - getUserDetail($id)                                                                                                                                                             
+  - updateUser($id, $data)                                                                                                                                                         
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## Demo 2：文章列表缓存                                                                                                                                                          
+                                                                                                                                                                                   
+  练：                                                                                                                                                                             
+                                                                                                                                                                                   
+  - getArticleList($categoryId, $page)                                                                                                                                             
+  - 更新文章后删详情缓存、删列表缓存                                                                                                                                               
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## Demo 3：商品详情 + 库存缓存                                                                                                                                                   
+                                                                                                                                                                                   
+  练：                                                                                                                                                                             
+                                                                                                                                                                                   
+  - 商品详情缓存                                                                                                                                                                   
+  - 热点商品缓存                                                                                                                                                                   
+  - 库存单独缓存                                                                                                                                                                   
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 九、企业项目开发时最容易踩的坑                                                                                                                                                 
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 1）更新数据库后忘删缓存                                                                                                                                                       
+                                                                                                                                                                                   
+  最常见脏数据来源。                                                                                                                                                               
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 2）key 设计混乱                                                                                                                                                               
+                                                                                                                                                                                   
+  后面根本不知道删哪个 key。                                                                                                                                                       
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 3）缓存整个模型对象                                                                                                                                                           
+                                                                                                                                                                                   
+  序列化麻烦，兼容性也差。                                                                                                                                                         
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 4）列表缓存失效策略混乱                                                                                                                                                       
+                                                                                                                                                                                   
+  更新一条记录，不知道哪些列表该删。                                                                                                                                               
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 5）全都缓存                                                                                                                                                                   
+                                                                                                                                                                                   
+  不是所有数据都适合缓存。                                                                                                                                                         
+  变化太快、查询太散的数据，缓存收益可能不高。                                                                                                                                     
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 十、一句话学习路线                                                                                                                                                             
+                                                                                                                                                                                   
+  > 先练详情缓存，再练列表缓存，再练缓存一致性，再练高并发问题。                                                                                                                   
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 十一、如果你要“企业项目熟练度”建议                                                                                                                                             
+                                                                                                                                                                                   
+  建议你至少手写这几套：                                                                                                                                                           
+                                                                                                                                                                                   
+  1. 用户详情缓存                                                                                                                                                                  
+  2. 文章详情 + 列表缓存                                                                                                                                                           
+  3. 商品详情缓存                                                                                                                                                                  
+  4. 更新后删缓存                                                                                                                                                                  
+  5. 缓存穿透防护 demo                                                                                                                                                             
+                                                                                                                                                                                   
+  做完这些，基本就不是只会概念了。                                                                                                                                                 
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  如果你要，我下一步可以直接给你：                                                                                                                                                 
+                                                                                                                                                                                   
+  1. Hyperf 模型缓存完整 demo（Controller → Service → Repository → Model）                                                                                                         
+  2. 企业项目常用缓存 key 规范文档                                                                                                                                                 
+  3. 缓存穿透 / 击穿 / 雪崩 demo
+
+
+下面给你一套 Hyperf 模型缓存完整 demo，采用你要的清晰分层：                                                                                                                      
+                                                                                                                                                                                   
+  > Controller → Service → Repository → Model                                                                                                                                      
+                                                                                                                                                                                   
+  并且使用 Redis 做详情缓存。                                                                                                                                                      
+                                                                                                                                                                                   
+  我用一张新表：demo_products                                                                                                                                                      
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 一、表结构 SQL                                                                                                                                                                 
+                                                                                                                                                                                   
+  DROP TABLE IF EXISTS `demo_products`;                                                                                                                                            
+                                                                                                                                                                                   
+  CREATE TABLE `demo_products` (                                                                                                                                                   
+    `id` bigint UNSIGNED NOT NULL AUTO_INCREMENT,                                                                                                                                  
+    `name` varchar(100) NOT NULL COMMENT '商品名称',                                                                                                                               
+    `price` decimal(10,2) NOT NULL DEFAULT 0.00 COMMENT '商品价格',                                                                                                                
+    `stock` int NOT NULL DEFAULT 0 COMMENT '库存',                                                                                                                                 
+    `status` tinyint NOT NULL DEFAULT 1 COMMENT '状态：1上架 0下架',                                                                                                               
+    `created_at` datetime DEFAULT NULL,                                                                                                                                            
+    `updated_at` datetime DEFAULT NULL,                                                                                                                                            
+    PRIMARY KEY (`id`)                                                                                                                                                             
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;                                                                                                                                         
+                                                                                                                                                                                   
+  测试数据：                                                                                                                                                                       
+                                                                                                                                                                                   
+  INSERT INTO `demo_products` (`name`, `price`, `stock`, `status`, `created_at`, `updated_at`) VALUES                                                                              
+  ('iPhone 16', 6999.00, 100, 1, NOW(), NOW()),                                                                                                                                    
+  ('Mate 70', 5999.00, 80, 1, NOW(), NOW());                                                                                                                                       
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 二、目录结构                                                                                                                                                                   
+                                                                                                                                                                                   
+  app                                                                                                                                                                              
+  ├── Controller                                                                                                                                                                   
+  │   └── DemoProductController.php                                                                                                                                                
+  ├── Model                                                                                                                                                                        
+  │   └── DemoProduct.php                                                                                                                                                          
+  ├── Repository                                                                                                                                                                   
+  │   └── DemoProductRepository.php                                                                                                                                                
+  └── Service                                                                                                                                                                      
+      ├── DemoProductService.php                                                                                                                                                   
+      └── RedisService.php                                                                                                                                                         
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 三、Model                                                                                                                                                                      
+                                                                                                                                                                                   
+  app/Model/DemoProduct.php                                                                                                                                                        
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  namespace App\Model;                                                                                                                                                             
+                                                                                                                                                                                   
+  use Hyperf\DbConnection\Model\Model;                                                                                                                                             
+                                                                                                                                                                                   
+  /**                                                                                                                                                                              
+   * 商品模型                                                                                                                                                                      
+   */                                                                                                                                                                              
+  class DemoProduct extends Model                                                                                                                                                  
+  {                                                                                                                                                                                
+      protected ?string $table = 'demo_products';                                                                                                                                  
+                                                                                                                                                                                   
+      protected array $fillable = [                                                                                                                                                
+          'name',                                                                                                                                                                  
+          'price',                                                                                                                                                                 
+          'stock',                                                                                                                                                                 
+          'status',                                                                                                                                                                
+          'created_at',                                                                                                                                                            
+          'updated_at',                                                                                                                                                            
+      ];                                                                                                                                                                           
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 四、RedisService                                                                                                                                                               
+                                                                                                                                                                                   
+  app/Service/RedisService.php                                                                                                                                                     
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  namespace App\Service;                                                                                                                                                           
+                                                                                                                                                                                   
+  use Hyperf\Di\Annotation\Inject;                                                                                                                                                 
+  use Hyperf\Redis\Redis;                                                                                                                                                          
+                                                                                                                                                                                   
+  class RedisService                                                                                                                                                               
+  {                                                                                                                                                                                
+      #[Inject]                                                                                                                                                                    
+      protected Redis $redis;                                                                                                                                                      
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 写缓存                                                                                                                                                                    
+       */                                                                                                                                                                          
+      public function set(string $key, mixed $value, int $ttl = 0): bool                                                                                                           
+      {                                                                                                                                                                            
+          $value = is_scalar($value)                                                                                                                                               
+              ? (string) $value                                                                                                                                                    
+              : json_encode($value, JSON_UNESCAPED_UNICODE);                                                                                                                       
+                                                                                                                                                                                   
+          if ($ttl > 0) {                                                                                                                                                          
+              return (bool) $this->redis->set($key, $value, $ttl);                                                                                                                 
+          }                                                                                                                                                                        
+                                                                                                                                                                                   
+          return (bool) $this->redis->set($key, $value);                                                                                                                           
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 读缓存                                                                                                                                                                    
+       */                                                                                                                                                                          
+      public function get(string $key, bool $decodeJson = false): mixed                                                                                                            
+      {                                                                                                                                                                            
+          $value = $this->redis->get($key);                                                                                                                                        
+                                                                                                                                                                                   
+          if ($value === false || $value === null) {                                                                                                                               
+              return null;                                                                                                                                                         
+          }                                                                                                                                                                        
+                                                                                                                                                                                   
+          return $decodeJson ? json_decode($value, true) : $value;                                                                                                                 
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 删缓存                                                                                                                                                                    
+       */                                                                                                                                                                          
+      public function delete(string $key): int                                                                                                                                     
+      {                                                                                                                                                                            
+          return $this->redis->del($key);                                                                                                                                          
+      }                                                                                                                                                                            
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 五、Repository                                                                                                                                                                 
+                                                                                                                                                                                   
+  Repository 负责：                                                                                                                                                                
+                                                                                                                                                                                   
+  - 查数据库                                                                                                                                                                       
+  - 查缓存                                                                                                                                                                         
+  - 回填缓存                                                                                                                                                                       
+  - 更新后删缓存                                                                                                                                                                   
+                                                                                                                                                                                   
+  app/Repository/DemoProductRepository.php                                                                                                                                         
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  namespace App\Repository;                                                                                                                                                        
+                                                                                                                                                                                   
+  use App\Model\DemoProduct;                                                                                                                                                       
+  use App\Service\RedisService;                                                                                                                                                    
+                                                                                                                                                                                   
+  class DemoProductRepository                                                                                                                                                      
+  {                                                                                                                                                                                
+      public function __construct(                                                                                                                                                 
+          protected RedisService $redisService                                                                                                                                     
+      ) {                                                                                                                                                                          
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 商品详情缓存 key                                                                                                                                                          
+       */                                                                                                                                                                          
+      protected function getDetailCacheKey(int $id): string                                                                                                                        
+      {                                                                                                                                                                            
+          return "demo_product:detail:{$id}";                                                                                                                                      
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 查询商品详情：先查缓存，没有再查数据库                                                                                                                                    
+       */                                                                                                                                                                          
+      public function findByIdWithCache(int $id): ?array                                                                                                                           
+      {                                                                                                                                                                            
+          $cacheKey = $this->getDetailCacheKey($id);                                                                                                                               
+                                                                                                                                                                                   
+          // 1. 先查缓存                                                                                                                                                           
+          $cached = $this->redisService->get($cacheKey, true);                                                                                                                     
+          if ($cached !== null) {                                                                                                                                                  
+              return $cached;                                                                                                                                                      
+          }                                                                                                                                                                        
+                                                                                                                                                                                   
+          // 2. 缓存没有，查数据库                                                                                                                                                 
+          $product = DemoProduct::query()->find($id);                                                                                                                              
+          if (! $product) {                                                                                                                                                        
+              return null;                                                                                                                                                         
+          }                                                                                                                                                                        
+                                                                                                                                                                                   
+          $data = $product->toArray();                                                                                                                                             
+                                                                                                                                                                                   
+          // 3. 回填缓存，缓存 10 分钟                                                                                                                                             
+          $this->redisService->set($cacheKey, $data, 600);                                                                                                                         
+                                                                                                                                                                                   
+          return $data;                                                                                                                                                            
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 查询全部商品（这里演示直接查库，不做列表缓存）                                                                                                                            
+       */                                                                                                                                                                          
+      public function getAll(): array                                                                                                                                              
+      {                                                                                                                                                                            
+          return DemoProduct::query()                                                                                                                                              
+              ->orderByDesc('id')                                                                                                                                                  
+              ->get()                                                                                                                                                              
+              ->toArray();                                                                                                                                                         
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 新增商品                                                                                                                                                                  
+       */                                                                                                                                                                          
+      public function create(array $data): DemoProduct                                                                                                                             
+      {                                                                                                                                                                            
+          return DemoProduct::query()->create($data);                                                                                                                              
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 更新商品                                                                                                                                                                  
+       *                                                                                                                                                                           
+       * 先更新数据库，再删缓存                                                                                                                                                    
+       */                                                                                                                                                                          
+      public function updateById(int $id, array $data): bool                                                                                                                       
+      {                                                                                                                                                                            
+          $result = (bool) DemoProduct::query()                                                                                                                                    
+              ->where('id', $id)                                                                                                                                                   
+              ->update($data);                                                                                                                                                     
+                                                                                                                                                                                   
+          if ($result) {                                                                                                                                                           
+              $this->redisService->delete($this->getDetailCacheKey($id));                                                                                                          
+          }                                                                                                                                                                        
+                                                                                                                                                                                   
+          return $result;                                                                                                                                                          
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 删除商品                                                                                                                                                                  
+       *                                                                                                                                                                           
+       * 先删数据库，再删缓存                                                                                                                                                      
+       */                                                                                                                                                                          
+      public function deleteById(int $id): bool                                                                                                                                    
+      {                                                                                                                                                                            
+          $result = (bool) DemoProduct::query()                                                                                                                                    
+              ->where('id', $id)                                                                                                                                                   
+              ->delete();                                                                                                                                                          
+                                                                                                                                                                                   
+          if ($result) {                                                                                                                                                           
+              $this->redisService->delete($this->getDetailCacheKey($id));                                                                                                          
+          }                                                                                                                                                                        
+                                                                                                                                                                                   
+          return $result;                                                                                                                                                          
+      }                                                                                                                                                                            
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 六、Service                                                                                                                                                                    
+                                                                                                                                                                                   
+  Service 负责业务逻辑。                                                                                                                                                           
+                                                                                                                                                                                   
+  app/Service/DemoProductService.php                                                                                                                                               
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  namespace App\Service;                                                                                                                                                           
+                                                                                                                                                                                   
+  use App\Repository\DemoProductRepository;                                                                                                                                        
+                                                                                                                                                                                   
+  class DemoProductService                                                                                                                                                         
+  {                                                                                                                                                                                
+      public function __construct(                                                                                                                                                 
+          protected DemoProductRepository $repository                                                                                                                              
+      ) {                                                                                                                                                                          
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 商品列表                                                                                                                                                                  
+       */                                                                                                                                                                          
+      public function getList(): array                                                                                                                                             
+      {                                                                                                                                                                            
+          return $this->repository->getAll();                                                                                                                                      
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 商品详情（带缓存）                                                                                                                                                        
+       */                                                                                                                                                                          
+      public function getDetail(int $id): ?array                                                                                                                                   
+      {                                                                                                                                                                            
+          return $this->repository->findByIdWithCache($id);                                                                                                                        
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 创建商品                                                                                                                                                                  
+       */                                                                                                                                                                          
+      public function create(string $name, float $price, int $stock, int $status = 1): array                                                                                       
+      {                                                                                                                                                                            
+          $product = $this->repository->create([                                                                                                                                   
+              'name' => $name,                                                                                                                                                     
+              'price' => $price,                                                                                                                                                   
+              'stock' => $stock,                                                                                                                                                   
+              'status' => $status,                                                                                                                                                 
+              'created_at' => date('Y-m-d H:i:s'),                                                                                                                                 
+              'updated_at' => date('Y-m-d H:i:s'),                                                                                                                                 
+          ]);                                                                                                                                                                      
+                                                                                                                                                                                   
+          return $product->toArray();                                                                                                                                              
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 更新商品                                                                                                                                                                  
+       */                                                                                                                                                                          
+      public function update(int $id, string $name, float $price, int $stock, int $status): bool                                                                                   
+      {                                                                                                                                                                            
+          return $this->repository->updateById($id, [                                                                                                                              
+              'name' => $name,                                                                                                                                                     
+              'price' => $price,                                                                                                                                                   
+              'stock' => $stock,                                                                                                                                                   
+              'status' => $status,                                                                                                                                                 
+              'updated_at' => date('Y-m-d H:i:s'),                                                                                                                                 
+          ]);                                                                                                                                                                      
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 删除商品                                                                                                                                                                  
+       */                                                                                                                                                                          
+      public function delete(int $id): bool                                                                                                                                        
+      {                                                                                                                                                                            
+          return $this->repository->deleteById($id);                                                                                                                               
+      }                                                                                                                                                                            
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 七、Controller                                                                                                                                                                 
+                                                                                                                                                                                   
+  app/Controller/DemoProductController.php                                                                                                                                         
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  namespace App\Controller;                                                                                                                                                        
+                                                                                                                                                                                   
+  use App\Service\DemoProductService;                                                                                                                                              
+  use Hyperf\HttpServer\Annotation\Controller;                                                                                                                                     
+  use Hyperf\HttpServer\Annotation\GetMapping;                                                                                                                                     
+  use Hyperf\HttpServer\Annotation\PostMapping;                                                                                                                                    
+                                                                                                                                                                                   
+  #[Controller(prefix: 'demo-product')]                                                                                                                                            
+  class DemoProductController                                                                                                                                                      
+  {                                                                                                                                                                                
+      public function __construct(                                                                                                                                                 
+          protected DemoProductService $service                                                                                                                                    
+      ) {                                                                                                                                                                          
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 商品列表                                                                                                                                                                  
+       */                                                                                                                                                                          
+      #[GetMapping('list')]                                                                                                                                                        
+      public function list(): array                                                                                                                                                
+      {                                                                                                                                                                            
+          return [                                                                                                                                                                 
+              'code' => 0,                                                                                                                                                         
+              'message' => 'success',                                                                                                                                              
+              'data' => $this->service->getList(),                                                                                                                                 
+          ];                                                                                                                                                                       
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 商品详情（带缓存）                                                                                                                                                        
+       */                                                                                                                                                                          
+      #[GetMapping('detail')]                                                                                                                                                      
+      public function detail(): array                                                                                                                                              
+      {                                                                                                                                                                            
+          return [                                                                                                                                                                 
+              'code' => 0,                                                                                                                                                         
+              'message' => 'success',                                                                                                                                              
+              'data' => $this->service->getDetail(1),                                                                                                                              
+          ];                                                                                                                                                                       
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 新增商品                                                                                                                                                                  
+       */                                                                                                                                                                          
+      #[PostMapping('create')]                                                                                                                                                     
+      public function create(): array                                                                                                                                              
+      {                                                                                                                                                                            
+          return [                                                                                                                                                                 
+              'code' => 0,                                                                                                                                                         
+              'message' => '新增成功',                                                                                                                                             
+              'data' => $this->service->create('MacBook Pro', 15999, 20, 1),                                                                                                       
+          ];                                                                                                                                                                       
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 更新商品                                                                                                                                                                  
+       */                                                                                                                                                                          
+      #[PostMapping('update')]                                                                                                                                                     
+      public function update(): array                                                                                                                                              
+      {                                                                                                                                                                            
+          $result = $this->service->update(1, 'iPhone 16 Pro', 7999, 90, 1);                                                                                                       
+                                                                                                                                                                                   
+          return [                                                                                                                                                                 
+              'code' => 0,                                                                                                                                                         
+              'message' => $result ? '更新成功' : '更新失败',                                                                                                                      
+              'data' => null,                                                                                                                                                      
+          ];                                                                                                                                                                       
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 删除商品                                                                                                                                                                  
+       */                                                                                                                                                                          
+      #[PostMapping('delete')]                                                                                                                                                     
+      public function delete(): array                                                                                                                                              
+      {                                                                                                                                                                            
+          $result = $this->service->delete(1);                                                                                                                                     
+                                                                                                                                                                                   
+          return [                                                                                                                                                                 
+              'code' => 0,                                                                                                                                                         
+              'message' => $result ? '删除成功' : '删除失败',                                                                                                                      
+              'data' => null,                                                                                                                                                      
+          ];                                                                                                                                                                       
+      }                                                                                                                                                                            
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 八、访问示例                                                                                                                                                                   
+                                                                                                                                                                                   
+  ## 查询列表                                                                                                                                                                      
+                                                                                                                                                                                   
+  GET /demo-product/list                                                                                                                                                           
+                                                                                                                                                                                   
+  ## 查询详情（第一次查库，后面走缓存）                                                                                                                                            
+                                                                                                                                                                                   
+  GET /demo-product/detail                                                                                                                                                         
+                                                                                                                                                                                   
+  ## 新增商品                                                                                                                                                                      
+                                                                                                                                                                                   
+  POST /demo-product/create                                                                                                                                                        
+                                                                                                                                                                                   
+  ## 更新商品（更新库后删缓存）                                                                                                                                                    
+                                                                                                                                                                                   
+  POST /demo-product/update                                                                                                                                                        
+                                                                                                                                                                                   
+  ## 删除商品（删库后删缓存）                                                                                                                                                      
+                                                                                                                                                                                   
+  POST /demo-product/delete                                                                                                                                                        
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 九、这套模型缓存的核心原理                                                                                                                                                     
+                                                                                                                                                                                   
+  ## 1. 查询详情                                                                                                                                                                   
+                                                                                                                                                                                   
+  流程：                                                                                                                                                                           
+                                                                                                                                                                                   
+  先查 Redis                                                                                                                                                                       
+    -> 有缓存，直接返回                                                                                                                                                            
+    -> 没缓存，查 MySQL                                                                                                                                                            
+        -> 查到后回填 Redis                                                                                                                                                        
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 2. 更新商品                                                                                                                                                                   
+                                                                                                                                                                                   
+  流程：                                                                                                                                                                           
+                                                                                                                                                                                   
+  先更新 MySQL                                                                                                                                                                     
+    -> 成功后删除 Redis 缓存                                                                                                                                                       
+                                                                                                                                                                                   
+  这叫：                                                                                                                                                                           
+                                                                                                                                                                                   
+  > Cache Aside（旁路缓存）                                                                                                                                                        
+                                                                                                                                                                                   
+  也是企业项目里最常见的模型缓存方案。                                                                                                                                             
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 3. 删除商品                                                                                                                                                                   
+                                                                                                                                                                                   
+  流程：                                                                                                                                                                           
+                                                                                                                                                                                   
+  先删 MySQL                                                                                                                                                                       
+    -> 成功后删 Redis 缓存                                                                                                                                                         
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 十、为什么这样设计符合企业项目                                                                                                                                                 
+                                                                                                                                                                                   
+  ## Controller                                                                                                                                                                    
+                                                                                                                                                                                   
+  只管请求和响应                                                                                                                                                                   
+                                                                                                                                                                                   
+  ## Service                                                                                                                                                                       
+                                                                                                                                                                                   
+  只管业务逻辑                                                                                                                                                                     
+                                                                                                                                                                                   
+  ## Repository                                                                                                                                                                    
+                                                                                                                                                                                   
+  只管数据访问 + 缓存策略                                                                                                                                                          
+                                                                                                                                                                                   
+  ## Model                                                                                                                                                                         
+                                                                                                                                                                                   
+  只管表映射                                                                                                                                                                       
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 十一、企业项目常见缓存 key 规范                                                                                                                                                
+                                                                                                                                                                                   
+  这套 demo 里用了：                                                                                                                                                               
+                                                                                                                                                                                   
+  demo_product:detail:{id}                                                                                                                                                         
+                                                                                                                                                                                   
+  例如：                                                                                                                                                                           
+                                                                                                                                                                                   
+  demo_product:detail:1                                                                                                                                                            
+  demo_product:detail:2                                                                                                                                                            
+                                                                                                                                                                                   
+  建议你实际项目里统一风格：                                                                                                                                                       
+                                                                                                                                                                                   
+  模块:资源:维度:标识                                                                                                                                                              
+                                                                                                                                                                                   
+  例如：                                                                                                                                                                           
+                                                                                                                                                                                   
+  - user:detail:1001                                                                                                                                                               
+  - product:detail:2001                                                                                                                                                            
+  - article:detail:3001
+

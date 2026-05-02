@@ -11,7 +11,9 @@ class RedisService
 {
     #[Inject]
     protected Redis $redis;
-
+    /**
+     * 写缓存
+     */
     public function set(string $key, mixed $value, int $ttl = 0): bool
     {
         $value = is_scalar($value) ? (string) $value : json_encode($value, JSON_UNESCAPED_UNICODE);
@@ -22,7 +24,9 @@ class RedisService
 
         return (bool) $this->redis->set($key, $value);
     }
-
+    /**
+     * 读缓存
+     */
     public function get(string $key, bool $decodeJson = false): mixed
     {
         $value = $this->redis->get($key);
@@ -38,6 +42,9 @@ class RedisService
         return $value;
     }
 
+    /**
+     * 删缓存
+     */
     public function delete(string $key): int
     {
         return $this->redis->del($key);
