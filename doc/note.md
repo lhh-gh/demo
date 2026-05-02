@@ -9980,3 +9980,1828 @@ return [
   - product:detail:2001                                                                                                                                                            
   - article:detail:3001
 
+
+# 一、列表缓存 demo                                                                                                                                                              
+                                                                                                                                                                                   
+  列表缓存的核心目标：                                                                                                                                                             
+                                                                                                                                                                                   
+  > 减少“列表页”反复查数据库的压力。                                                                                                                                               
+                                                                                                                                                                                   
+  例如：                                                                                                                                                                           
+                                                                                                                                                                                   
+  - 商品列表                                                                                                                                                                       
+  - 文章列表                                                                                                                                                                       
+  - 首页推荐列表                                                                                                                                                                   
+  - 分类列表                                                                                                                                                                       
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 1. 列表缓存最基本写法                                                                                                                                                         
+                                                                                                                                                                                   
+  假设缓存 key：                                                                                                                                                                   
+                                                                                                                                                                                   
+  demo_product:list:all                                                                                                                                                            
+                                                                                                                                                                                   
+  ### Repository 示例                                                                                                                                                              
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  namespace App\Repository;                                                                                                                                                        
+                                                                                                                                                                                   
+  use App\Model\DemoProduct;                                                                                                                                                       
+  use App\Service\RedisService;                                                                                                                                                    
+                                                                                                                                                                                   
+  class DemoProductRepository                                                                                                                                                      
+  {                                                                                                                                                                                
+      public function __construct(                                                                                                                                                 
+          protected RedisService $redisService                                                                                                                                     
+      ) {                                                                                                                                                                          
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 列表缓存 key                                                                                                                                                              
+       */                                                                                                                                                                          
+      protected function getListCacheKey(): string                                                                                                                                 
+      {                                                                                                                                                                            
+          return 'demo_product:list:all';                                                                                                                                          
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 获取商品列表（带缓存）                                                                                                                                                    
+       *                                                                                                                                                                           
+       * 逻辑：                                                                                                                                                                    
+       * 1. 先查 Redis                                                                                                                                                             
+       * 2. 命中则直接返回                                                                                                                                                         
+       * 3. 没命中则查数据库                                                                                                                                                       
+       * 4. 查到后回填 Redis                                                                                                                                                       
+       */                                                                                                                                                                          
+      public function getAllWithCache(): array                                                                                                                                     
+      {                                                                                                                                                                            
+          $cacheKey = $this->getListCacheKey();                                                                                                                                    
+                                                                                                                                                                                   
+          // 先查缓存                                                                                                                                                              
+          $cached = $this->redisService->get($cacheKey, true);                                                                                                                     
+          if (is_array($cached)) {                                                                                                                                                 
+              return $cached;                                                                                                                                                      
+          }                                                                                                                                                                        
+                                                                                                                                                                                   
+          // 缓存没有，查数据库                                                                                                                                                    
+          $data = DemoProduct::query()                                                                                                                                             
+              ->where('status', 1)                                                                                                                                                 
+              ->orderByDesc('id')                                                                                                                                                  
+              ->get()                                                                                                                                                              
+              ->toArray();                                                                                                                                                         
+                                                                                                                                                                                   
+          // 回填缓存，缓存 5 分钟                                                                                                                                                 
+          $this->redisService->set($cacheKey, $data, 300);                                                                                                                         
+                                                                                                                                                                                   
+          return $data;                                                                                                                                                            
+      }                                                                                                                                                                            
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 2. 为什么列表缓存不能只会“查”                                                                                                                                                 
+                                                                                                                                                                                   
+  因为列表缓存最关键的是：                                                                                                                                                         
+                                                                                                                                                                                   
+  > 数据变更后，怎么处理缓存                                                                                                                                                       
+                                                                                                                                                                                   
+  例如：                                                                                                                                                                           
+                                                                                                                                                                                   
+  - 新增商品                                                                                                                                                                       
+  - 更新商品状态                                                                                                                                                                   
+  - 删除商品                                                                                                                                                                       
+                                                                                                                                                                                   
+  这些都有可能影响列表结果。                                                                                                                                                       
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 3. 列表缓存更新策略                                                                                                                                                           
+                                                                                                                                                                                   
+  企业项目里最常见的不是“精准更新列表缓存”，而是：                                                                                                                                 
+                                                                                                                                                                                   
+  > 更新数据库后，直接删除列表缓存                                                                                                                                                 
+                                                                                                                                                                                   
+  例如：                                                                                                                                                                           
+                                                                                                                                                                                   
+  public function updateById(int $id, array $data): bool                                                                                                                           
+  {                                                                                                                                                                                
+      $result = (bool) DemoProduct::query()                                                                                                                                        
+          ->where('id', $id)                                                                                                                                                       
+          ->update($data);                                                                                                                                                         
+                                                                                                                                                                                   
+      if ($result) {                                                                                                                                                               
+          $this->redisService->delete('demo_product:list:all');                                                                                                                    
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      return $result;                                                                                                                                                              
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ### 为什么这么做                                                                                                                                                                 
+                                                                                                                                                                                   
+  因为列表缓存往往受很多条件影响：                                                                                                                                                 
+                                                                                                                                                                                   
+  - 排序                                                                                                                                                                           
+  - 状态                                                                                                                                                                           
+  - 分类                                                                                                                                                                           
+  - 分页                                                                                                                                                                           
+  - 搜索词                                                                                                                                                                         
+                                                                                                                                                                                   
+  如果每次都去“精确修改缓存里的列表内容”，很复杂，也容易错。                                                                                                                       
+                                                                                                                                                                                   
+  所以企业里更常见：                                                                                                                                                               
+                                                                                                                                                                                   
+  - 更新 DB                                                                                                                                                                        
+  - 删列表缓存                                                                                                                                                                     
+  - 让下次请求自动重建                                                                                                                                                             
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 4. 带分页 / 条件的列表缓存怎么设计 key                                                                                                                                        
+                                                                                                                                                                                   
+  如果不是单纯“全部列表”，而是：                                                                                                                                                   
+                                                                                                                                                                                   
+  GET /products?page=1&page_size=10&status=1                                                                                                                                       
+                                                                                                                                                                                   
+  key 就要带条件：                                                                                                                                                                 
+                                                                                                                                                                                   
+  demo_product:list:status:1:page:1:size:10                                                                                                                                        
+                                                                                                                                                                                   
+  如果还有搜索词：                                                                                                                                                                 
+                                                                                                                                                                                   
+  demo_product:list:status:1:keyword:iphone:page:1:size:10                                                                                                                         
+                                                                                                                                                                                   
+  ### 关键原则                                                                                                                                                                     
+                                                                                                                                                                                   
+  > 影响结果的查询条件，都应该进入 key                                                                                                                                             
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 5. 列表缓存适合什么数据                                                                                                                                                       
+                                                                                                                                                                                   
+  更适合缓存这些：                                                                                                                                                                 
+                                                                                                                                                                                   
+  - 变化不特别频繁的列表                                                                                                                                                           
+  - 首页推荐                                                                                                                                                                       
+  - 分类列表                                                                                                                                                                       
+  - 热门商品列表                                                                                                                                                                   
+  - 热门文章列表                                                                                                                                                                   
+                                                                                                                                                                                   
+  ### 不太适合缓存                                                                                                                                                                 
+                                                                                                                                                                                   
+  - 查询条件特别复杂、特别分散的列表                                                                                                                                               
+  - 实时变化很快的后台搜索列表                                                                                                                                                     
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 二、缓存穿透 / 击穿 / 雪崩 demo                                                                                                                                                
+                                                                                                                                                                                   
+  这三个是企业项目里非常重要的缓存稳定性问题。                                                                                                                                     
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 1. 缓存穿透                                                                                                                                                                    
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 什么是缓存穿透                                                                                                                                                                
+                                                                                                                                                                                   
+  请求的数据根本不存在：                                                                                                                                                           
+                                                                                                                                                                                   
+  - Redis 没有                                                                                                                                                                     
+  - MySQL 也没有                                                                                                                                                                   
+                                                                                                                                                                                   
+  如果有人一直请求：                                                                                                                                                               
+                                                                                                                                                                                   
+  /products/99999999                                                                                                                                                               
+                                                                                                                                                                                   
+  每次都会打到数据库。                                                                                                                                                             
+                                                                                                                                                                                   
+  这就叫缓存穿透。                                                                                                                                                                 
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 解决方案：空值缓存                                                                                                                                                            
+                                                                                                                                                                                   
+  ### Demo                                                                                                                                                                         
+                                                                                                                                                                                   
+  public function findByIdWithCache(int $id): ?array                                                                                                                               
+  {                                                                                                                                                                                
+      $cacheKey = "demo_product:detail:{$id}";                                                                                                                                     
+                                                                                                                                                                                   
+      $cached = $this->redisService->get($cacheKey, true);                                                                                                                         
+                                                                                                                                                                                   
+      // 如果缓存里有正常数据，直接返回                                                                                                                                            
+      if (is_array($cached)) {                                                                                                                                                     
+          return $cached;                                                                                                                                                          
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      // 如果缓存里存的是空值标记，直接返回 null                                                                                                                                   
+      if ($cached === '__NULL__') {                                                                                                                                                
+          return null;                                                                                                                                                             
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      // 查数据库                                                                                                                                                                  
+      $product = DemoProduct::query()->find($id);                                                                                                                                  
+                                                                                                                                                                                   
+      // 数据库也没有，写入空值缓存，防止继续穿透                                                                                                                                  
+      if (! $product) {                                                                                                                                                            
+          $this->redisService->set($cacheKey, '__NULL__', 60);                                                                                                                     
+          return null;                                                                                                                                                             
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      $data = $product->toArray();                                                                                                                                                 
+                                                                                                                                                                                   
+      // 正常数据写缓存                                                                                                                                                            
+      $this->redisService->set($cacheKey, $data, 600);                                                                                                                             
+                                                                                                                                                                                   
+      return $data;                                                                                                                                                                
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 为什么有效                                                                                                                                                                    
+                                                                                                                                                                                   
+  第一次查不存在数据：                                                                                                                                                             
+                                                                                                                                                                                   
+  - 查库失败                                                                                                                                                                       
+  - 缓存一个空值                                                                                                                                                                   
+                                                                                                                                                                                   
+  后面 60 秒内再有人查同一个不存在 ID：                                                                                                                                            
+                                                                                                                                                                                   
+  - 直接命中空值缓存                                                                                                                                                               
+  - 不再打数据库                                                                                                                                                                   
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 2. 缓存击穿                                                                                                                                                                    
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 什么是缓存击穿                                                                                                                                                                
+                                                                                                                                                                                   
+  某个热点 key非常多人访问，刚好过期了。                                                                                                                                           
+                                                                                                                                                                                   
+  例如：                                                                                                                                                                           
+                                                                                                                                                                                   
+  demo_product:detail:1                                                                                                                                                            
+                                                                                                                                                                                   
+  过期瞬间，1000 个请求同时过来：                                                                                                                                                  
+                                                                                                                                                                                   
+  - Redis 没有                                                                                                                                                                     
+  - 1000 个请求同时查数据库                                                                                                                                                        
+                                                                                                                                                                                   
+  这就叫缓存击穿。                                                                                                                                                                 
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 解决方案：互斥锁重建缓存                                                                                                                                                      
+                                                                                                                                                                                   
+  ### Demo                                                                                                                                                                         
+                                                                                                                                                                                   
+  public function findByIdWithCache(int $id): ?array                                                                                                                               
+  {                                                                                                                                                                                
+      $cacheKey = "demo_product:detail:{$id}";                                                                                                                                     
+      $lockKey = "demo_product:mutex:{$id}";                                                                                                                                       
+                                                                                                                                                                                   
+      $cached = $this->redisService->get($cacheKey, true);                                                                                                                         
+                                                                                                                                                                                   
+      if (is_array($cached)) {                                                                                                                                                     
+          return $cached;                                                                                                                                                          
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      if ($cached === '__NULL__') {                                                                                                                                                
+          return null;                                                                                                                                                             
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      // 尝试加互斥锁，只有一个请求能成功                                                                                                                                          
+      $locked = $this->redisService->getClient()->set($lockKey, 1, ['nx', 'ex' => 5]);                                                                                             
+                                                                                                                                                                                   
+      if (! $locked) {                                                                                                                                                             
+          // 说明别的请求正在重建缓存                                                                                                                                              
+          usleep(100 * 1000);                                                                                                                                                      
+                                                                                                                                                                                   
+          // 短暂等待后再查一次缓存                                                                                                                                                
+          $retry = $this->redisService->get($cacheKey, true);                                                                                                                      
+                                                                                                                                                                                   
+          if (is_array($retry)) {                                                                                                                                                  
+              return $retry;                                                                                                                                                       
+          }                                                                                                                                                                        
+                                                                                                                                                                                   
+          if ($retry === '__NULL__') {                                                                                                                                             
+              return null;                                                                                                                                                         
+          }                                                                                                                                                                        
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      try {                                                                                                                                                                        
+          $product = DemoProduct::query()->find($id);                                                                                                                              
+                                                                                                                                                                                   
+          if (! $product) {                                                                                                                                                        
+              $this->redisService->set($cacheKey, '__NULL__', 60);                                                                                                                 
+              return null;                                                                                                                                                         
+          }                                                                                                                                                                        
+                                                                                                                                                                                   
+          $data = $product->toArray();                                                                                                                                             
+          $this->redisService->set($cacheKey, $data, 600);                                                                                                                         
+                                                                                                                                                                                   
+          return $data;                                                                                                                                                            
+      } finally {                                                                                                                                                                  
+          $this->redisService->delete($lockKey);                                                                                                                                   
+      }                                                                                                                                                                            
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 为什么有效                                                                                                                                                                    
+                                                                                                                                                                                   
+  过期瞬间：                                                                                                                                                                       
+                                                                                                                                                                                   
+  - 只有一个请求拿到锁，去查库并重建缓存                                                                                                                                           
+  - 其他请求等待一下再读缓存                                                                                                                                                       
+  - 避免一窝蜂打数据库                                                                                                                                                             
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 3. 缓存雪崩                                                                                                                                                                    
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 什么是缓存雪崩                                                                                                                                                                
+                                                                                                                                                                                   
+  大量缓存 key 在同一时间一起过期。                                                                                                                                                
+                                                                                                                                                                                   
+  例如你给 10000 个 key 都设置：                                                                                                                                                   
+                                                                                                                                                                                   
+  TTL = 600 秒                                                                                                                                                                     
+                                                                                                                                                                                   
+  那 10 分钟后它们会同时失效，数据库压力瞬间暴涨。                                                                                                                                 
+                                                                                                                                                                                   
+  这就叫缓存雪崩。                                                                                                                                                                 
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 解决方案：随机过期时间                                                                                                                                                        
+                                                                                                                                                                                   
+  ### Demo                                                                                                                                                                         
+                                                                                                                                                                                   
+  protected function randomTtl(int $base): int                                                                                                                                     
+  {                                                                                                                                                                                
+      return $base + random_int(30, 180);                                                                                                                                          
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  使用时：                                                                                                                                                                         
+                                                                                                                                                                                   
+  $this->redisService->set($cacheKey, $data, $this->randomTtl(600));                                                                                                               
+                                                                                                                                                                                   
+  这意味着：                                                                                                                                                                       
+                                                                                                                                                                                   
+  - 原本 600 秒                                                                                                                                                                    
+  - 现在会变成 630 ~ 780 秒随机过期                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 为什么有效                                                                                                                                                                    
+                                                                                                                                                                                   
+  让 key 的失效时间错开，不会同时回源数据库。                                                                                                                                      
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 三、把这几个点合并成一个企业版 Repository 示例                                                                                                                                 
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  namespace App\Repository;                                                                                                                                                        
+                                                                                                                                                                                   
+  use App\Model\DemoProduct;                                                                                                                                                       
+  use App\Service\RedisService;                                                                                                                                                    
+                                                                                                                                                                                   
+  class DemoProductRepository                                                                                                                                                      
+  {                                                                                                                                                                                
+      public function __construct(                                                                                                                                                 
+          protected RedisService $redisService                                                                                                                                     
+      ) {                                                                                                                                                                          
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      protected function getDetailCacheKey(int $id): string                                                                                                                        
+      {                                                                                                                                                                            
+          return "demo_product:detail:{$id}";                                                                                                                                      
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      protected function getListCacheKey(): string                                                                                                                                 
+      {                                                                                                                                                                            
+          return 'demo_product:list:all';                                                                                                                                          
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      protected function getMutexKey(int $id): string                                                                                                                              
+      {                                                                                                                                                                            
+          return "demo_product:mutex:{$id}";                                                                                                                                       
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 随机 TTL，缓解缓存雪崩                                                                                                                                                    
+       */                                                                                                                                                                          
+      protected function randomTtl(int $base): int                                                                                                                                 
+      {                                                                                                                                                                            
+          return $base + random_int(30, 180);                                                                                                                                      
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 列表缓存                                                                                                                                                                  
+       */                                                                                                                                                                          
+      public function getAllWithCache(): array                                                                                                                                     
+      {                                                                                                                                                                            
+          $cacheKey = $this->getListCacheKey();                                                                                                                                    
+          $cached = $this->redisService->get($cacheKey, true);                                                                                                                     
+                                                                                                                                                                                   
+          if (is_array($cached)) {                                                                                                                                                 
+              return $cached;                                                                                                                                                      
+          }                                                                                                                                                                        
+                                                                                                                                                                                   
+          $data = DemoProduct::query()                                                                                                                                             
+              ->where('status', 1)                                                                                                                                                 
+              ->orderByDesc('id')                                                                                                                                                  
+              ->get()                                                                                                                                                              
+              ->toArray();                                                                                                                                                         
+                                                                                                                                                                                   
+          $this->redisService->set($cacheKey, $data, $this->randomTtl(300));                                                                                                       
+                                                                                                                                                                                   
+          return $data;                                                                                                                                                            
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 详情缓存 + 穿透 + 击穿 + 雪崩保护                                                                                                                                         
+       */                                                                                                                                                                          
+      public function findByIdWithCache(int $id): ?array                                                                                                                           
+      {                                                                                                                                                                            
+          $cacheKey = $this->getDetailCacheKey($id);                                                                                                                               
+          $cached = $this->redisService->get($cacheKey, true);                                                                                                                     
+                                                                                                                                                                                   
+          // 命中正常缓存                                                                                                                                                          
+          if (is_array($cached)) {                                                                                                                                                 
+              return $cached;                                                                                                                                                      
+          }                                                                                                                                                                        
+                                                                                                                                                                                   
+          // 命中空值缓存，防穿透                                                                                                                                                  
+          if ($cached === '__NULL__') {                                                                                                                                            
+              return null;                                                                                                                                                         
+          }                                                                                                                                                                        
+                                                                                                                                                                                   
+          $lockKey = $this->getMutexKey($id);                                                                                                                                      
+          $locked = $this->redisService->getClient()->set($lockKey, 1, ['nx', 'ex' => 5]);                                                                                         
+                                                                                                                                                                                   
+          if (! $locked) {                                                                                                                                                         
+              usleep(100 * 1000);                                                                                                                                                  
+                                                                                                                                                                                   
+              $retry = $this->redisService->get($cacheKey, true);                                                                                                                  
+                                                                                                                                                                                   
+              if (is_array($retry)) {                                                                                                                                              
+                  return $retry;                                                                                                                                                   
+              }                                                                                                                                                                    
+                                                                                                                                                                                   
+              if ($retry === '__NULL__') {                                                                                                                                         
+                  return null;                                                                                                                                                     
+              }                                                                                                                                                                    
+          }                                                                                                                                                                        
+                                                                                                                                                                                   
+          try {                                                                                                                                                                    
+              $product = DemoProduct::query()->find($id);                                                                                                                          
+                                                                                                                                                                                   
+              // 空值缓存，防穿透                                                                                                                                                  
+              if (! $product) {                                                                                                                                                    
+                  $this->redisService->set($cacheKey, '__NULL__', 60);                                                                                                             
+                  return null;                                                                                                                                                     
+              }                                                                                                                                                                    
+                                                                                                                                                                                   
+              $data = $product->toArray();                                                                                                                                         
+                                                                                                                                                                                   
+              // 随机 TTL，防雪崩                                                                                                                                                  
+              $this->redisService->set($cacheKey, $data, $this->randomTtl(600));                                                                                                   
+                                                                                                                                                                                   
+              return $data;                                                                                                                                                        
+          } finally {                                                                                                                                                              
+              $this->redisService->delete($lockKey);                                                                                                                               
+          }                                                                                                                                                                        
+      }                                                                                                                                                                            
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 四、一句话记忆法                                                                                                                                                               
+                                                                                                                                                                                   
+  ## 列表缓存                                                                                                                                                                      
+                                                                                                                                                                                   
+  > 查缓存 -> 查库 -> 回填                                                                                                                                                         
+  > 更新后删列表缓存                                                                                                                                                               
+                                                                                                                                                                                   
+  ## 缓存穿透                                                                                                                                                                      
+                                                                                                                                                                                   
+  > 数据不存在也要缓存一个空值                                                                                                                                                     
+                                                                                                                                                                                   
+  ## 缓存击穿                                                                                                                                                                      
+                                                                                                                                                                                   
+  > 热点 key 过期时用互斥锁重建缓存                                                                                                                                                
+                                                                                                                                                                                   
+  ## 缓存雪崩                                                                                                                                                                      
+                                                                                                                                                                                   
+  > 给缓存加随机 TTL，避免同时过期                                                                                                                                                 
+                                                                                                                                                                                   
+  ———
+
+> 同一个问题，往往有多种解法，按业务场景选。                                                                                                                                     
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 一、缓存穿透的常见解决方案                                                                                                                                                     
+                                                                                                                                                                                   
+  缓存穿透指的是：                                                                                                                                                                 
+                                                                                                                                                                                   
+  > 请求的数据根本不存在，缓存没有，数据库也没有，请求不断打到数据库。                                                                                                             
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 1）空值缓存                                                                                                                                                                   
+                                                                                                                                                                                   
+  你前面已经看过：                                                                                                                                                                 
+                                                                                                                                                                                   
+  if (! $data) {                                                                                                                                                                   
+      redis->set($key, '__NULL__', 60);                                                                                                                                            
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ### 优点                                                                                                                                                                         
+                                                                                                                                                                                   
+  - 实现简单                                                                                                                                                                       
+  - 立刻有效                                                                                                                                                                       
+                                                                                                                                                                                   
+  ### 缺点                                                                                                                                                                         
+                                                                                                                                                                                   
+  - 会多占一点缓存空间                                                                                                                                                             
+  - 不适合超大规模恶意随机 key 攻击                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 2）布隆过滤器（Bloom Filter）                                                                                                                                                 
+                                                                                                                                                                                   
+  这是企业项目里更常见的“高级方案”。                                                                                                                                               
+                                                                                                                                                                                   
+  原理：                                                                                                                                                                           
+                                                                                                                                                                                   
+  - 先把可能存在的 ID 放到布隆过滤器                                                                                                                                               
+  - 请求进来先判断：                                                                                                                                                               
+      - 如果布隆过滤器判定“不存在”，直接拦截                                                                                                                                       
+      - 如果“可能存在”，再去查 Redis / MySQL                                                                                                                                       
+                                                                                                                                                                                   
+  ### 适合                                                                                                                                                                         
+                                                                                                                                                                                   
+  - 用户 ID                                                                                                                                                                        
+  - 商品 ID                                                                                                                                                                        
+  - 文章 ID                                                                                                                                                                        
+  - 大量主键型查询                                                                                                                                                                 
+                                                                                                                                                                                   
+  ### 优点                                                                                                                                                                         
+                                                                                                                                                                                   
+  - 拦截效果强                                                                                                                                                                     
+  - 减少无效请求打到缓存/数据库                                                                                                                                                    
+                                                                                                                                                                                   
+  ### 缺点                                                                                                                                                                         
+                                                                                                                                                                                   
+  - 有一定误判率（可能把不存在判成可能存在）                                                                                                                                       
+  - 需要额外维护布隆过滤器                                                                                                                                                         
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 3）接口参数校验                                                                                                                                                               
+                                                                                                                                                                                   
+  这是最容易被忽略但非常实用的方案。                                                                                                                                               
+                                                                                                                                                                                   
+  例如：                                                                                                                                                                           
+                                                                                                                                                                                   
+  - ID 必须是正整数                                                                                                                                                                
+  - 长度必须符合规则                                                                                                                                                               
+  - 手机号格式正确                                                                                                                                                                 
+  - SKU 编码格式合法                                                                                                                                                               
+                                                                                                                                                                                   
+  例如：                                                                                                                                                                           
+                                                                                                                                                                                   
+  if ($id <= 0) {                                                                                                                                                                  
+      return error('参数错误');                                                                                                                                                    
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ### 优点                                                                                                                                                                         
+                                                                                                                                                                                   
+  - 非常简单                                                                                                                                                                       
+  - 能挡掉大量无效请求                                                                                                                                                             
+                                                                                                                                                                                   
+  ### 缺点                                                                                                                                                                         
+                                                                                                                                                                                   
+  - 只能挡掉“明显非法参数”                                                                                                                                                         
+  - 挡不住“合法但不存在”的 key                                                                                                                                                     
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 4）访问限流 / 风控                                                                                                                                                            
+                                                                                                                                                                                   
+  如果有人疯狂请求不存在的数据：                                                                                                                                                   
+                                                                                                                                                                                   
+  - IP 限流                                                                                                                                                                        
+  - 用户限流                                                                                                                                                                       
+  - 接口限流                                                                                                                                                                       
+  - 黑名单                                                                                                                                                                         
+                                                                                                                                                                                   
+  这也是防穿透的一部分。                                                                                                                                                           
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 二、缓存击穿的常见解决方案                                                                                                                                                     
+                                                                                                                                                                                   
+  缓存击穿指的是：                                                                                                                                                                 
+                                                                                                                                                                                   
+  > 某个热点 key 过期瞬间，大量请求同时回源数据库。                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 1）互斥锁重建缓存                                                                                                                                                             
+                                                                                                                                                                                   
+  你前面已经看过。                                                                                                                                                                 
+                                                                                                                                                                                   
+  核心是：                                                                                                                                                                         
+                                                                                                                                                                                   
+  - 只有一个线程/请求去查库重建缓存                                                                                                                                                
+  - 其他请求等待或快速失败                                                                                                                                                         
+                                                                                                                                                                                   
+  ### 优点                                                                                                                                                                         
+                                                                                                                                                                                   
+  - 最经典                                                                                                                                                                         
+  - 通用性强                                                                                                                                                                       
+                                                                                                                                                                                   
+  ### 缺点                                                                                                                                                                         
+                                                                                                                                                                                   
+  - 实现复杂度稍高                                                                                                                                                                 
+  - 锁设计不好会影响性能                                                                                                                                                           
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 2）热点数据永不过期 + 异步更新                                                                                                                                                
+                                                                                                                                                                                   
+  对于极热点 key，可以不设置 TTL，或者逻辑上不过期。                                                                                                                               
+                                                                                                                                                                                   
+  做法：                                                                                                                                                                           
+                                                                                                                                                                                   
+  - Redis 中一直保留数据                                                                                                                                                           
+  - 后台定时任务 / MQ / 异步任务定期刷新                                                                                                                                           
+                                                                                                                                                                                   
+  ### 适合                                                                                                                                                                         
+                                                                                                                                                                                   
+  - 热门商品详情                                                                                                                                                                   
+  - 配置项                                                                                                                                                                         
+  - 首页热门榜单                                                                                                                                                                   
+  - 大流量核心详情页                                                                                                                                                               
+                                                                                                                                                                                   
+  ### 优点                                                                                                                                                                         
+                                                                                                                                                                                   
+  - 不会发生“过期瞬间击穿”                                                                                                                                                         
+                                                                                                                                                                                   
+  ### 缺点                                                                                                                                                                         
+                                                                                                                                                                                   
+  - 数据不是强实时                                                                                                                                                                 
+  - 需要刷新机制                                                                                                                                                                   
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 3）逻辑过期                                                                                                                                                                   
+                                                                                                                                                                                   
+  不是让 Redis 真实过期，而是在 value 里存一个“逻辑过期时间”。                                                                                                                     
+                                                                                                                                                                                   
+  例如缓存值：                                                                                                                                                                     
+                                                                                                                                                                                   
+  {                                                                                                                                                                                
+    "data": {...},                                                                                                                                                                 
+    "expire_at": 1711111111                                                                                                                                                        
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  读的时候：                                                                                                                                                                       
+                                                                                                                                                                                   
+  - 如果没过期，直接返回                                                                                                                                                           
+  - 如果过期了，先返回旧数据                                                                                                                                                       
+  - 同时异步触发缓存重建                                                                                                                                                           
+                                                                                                                                                                                   
+  ### 优点                                                                                                                                                                         
+                                                                                                                                                                                   
+  - 用户体验更好，不容易阻塞                                                                                                                                                       
+  - 避免热点数据瞬间全部回源                                                                                                                                                       
+                                                                                                                                                                                   
+  ### 缺点                                                                                                                                                                         
+                                                                                                                                                                                   
+  - 实现复杂                                                                                                                                                                       
+  - 会短时间返回旧数据                                                                                                                                                             
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 4）二级缓存 / 本地缓存 + Redis                                                                                                                                                
+                                                                                                                                                                                   
+  例如：                                                                                                                                                                           
+                                                                                                                                                                                   
+  - 本地内存缓存（进程内）                                                                                                                                                         
+  - Redis 缓存                                                                                                                                                                     
+  - MySQL                                                                                                                                                                          
+                                                                                                                                                                                   
+  查询链路：                                                                                                                                                                       
+                                                                                                                                                                                   
+  本地缓存 -> Redis -> MySQL                                                                                                                                                       
+                                                                                                                                                                                   
+  ### 优点                                                                                                                                                                         
+                                                                                                                                                                                   
+  - 热点 key 访问更快                                                                                                                                                              
+  - 进一步减轻 Redis 和 DB 压力                                                                                                                                                    
+                                                                                                                                                                                   
+  ### 缺点                                                                                                                                                                         
+                                                                                                                                                                                   
+  - 多级缓存一致性更复杂                                                                                                                                                           
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 三、缓存雪崩的常见解决方案                                                                                                                                                     
+                                                                                                                                                                                   
+  缓存雪崩指的是：                                                                                                                                                                 
+                                                                                                                                                                                   
+  > 大量 key 在同一时间一起失效，导致数据库被瞬时打爆。                                                                                                                            
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 1）随机过期时间                                                                                                                                                               
+                                                                                                                                                                                   
+  这是最简单也是最常用的方案。                                                                                                                                                     
+                                                                                                                                                                                   
+  ttl = base + random                                                                                                                                                              
+                                                                                                                                                                                   
+  例如：                                                                                                                                                                           
+                                                                                                                                                                                   
+  600 + random(30, 180)                                                                                                                                                            
+                                                                                                                                                                                   
+  ### 优点                                                                                                                                                                         
+                                                                                                                                                                                   
+  - 实现简单                                                                                                                                                                       
+  - 很实用                                                                                                                                                                         
+                                                                                                                                                                                   
+  ### 缺点                                                                                                                                                                         
+                                                                                                                                                                                   
+  - 只是缓解，不是彻底解决                                                                                                                                                         
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 2）缓存分批预热                                                                                                                                                               
+                                                                                                                                                                                   
+  不要让大量缓存 key 同时生成、同时设置同一个 TTL。                                                                                                                                
+                                                                                                                                                                                   
+  例如：                                                                                                                                                                           
+                                                                                                                                                                                   
+  - 分批导入缓存                                                                                                                                                                   
+  - 分批预热                                                                                                                                                                       
+  - 分批刷新                                                                                                                                                                       
+                                                                                                                                                                                   
+  ### 优点                                                                                                                                                                         
+                                                                                                                                                                                   
+  - 从源头避免“同时过期”                                                                                                                                                           
+                                                                                                                                                                                   
+  ### 缺点                                                                                                                                                                         
+                                                                                                                                                                                   
+  - 需要额外预热逻辑                                                                                                                                                               
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 3）多级缓存                                                                                                                                                                   
+                                                                                                                                                                                   
+  例如：                                                                                                                                                                           
+                                                                                                                                                                                   
+  - 本地缓存                                                                                                                                                                       
+  - Redis                                                                                                                                                                          
+  - 数据库                                                                                                                                                                         
+                                                                                                                                                                                   
+  即使 Redis 某批 key 同时过期，本地缓存还能扛一部分流量。                                                                                                                         
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 4）降级 / 熔断 / 限流                                                                                                                                                         
+                                                                                                                                                                                   
+  如果缓存大面积失效，数据库扛不住时：                                                                                                                                             
+                                                                                                                                                                                   
+  - 返回兜底数据                                                                                                                                                                   
+  - 返回默认列表                                                                                                                                                                   
+  - 暂时只返回部分内容                                                                                                                                                             
+  - 熔断某些非核心接口                                                                                                                                                             
+  - 限流                                                                                                                                                                           
+                                                                                                                                                                                   
+  ### 适合                                                                                                                                                                         
+                                                                                                                                                                                   
+  - 大促                                                                                                                                                                           
+  - 秒杀                                                                                                                                                                           
+  - 高并发系统                                                                                                                                                                     
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 5）永不过期 + 异步更新                                                                                                                                                        
+                                                                                                                                                                                   
+  对于特别重要且访问极高的数据，也可以用这个方案来避免雪崩。                                                                                                                       
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 四、企业项目里常见的组合方案                                                                                                                                                   
+                                                                                                                                                                                   
+  真正项目里一般不是“只用一个”。                                                                                                                                                   
+                                                                                                                                                                                   
+  通常会组合：                                                                                                                                                                     
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 防穿透组合                                                                                                                                                                    
+                                                                                                                                                                                   
+  - 参数校验                                                                                                                                                                       
+  - 空值缓存                                                                                                                                                                       
+  - 布隆过滤器                                                                                                                                                                     
+  - 限流                                                                                                                                                                           
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 防击穿组合                                                                                                                                                                    
+                                                                                                                                                                                   
+  - 热点 key 互斥锁                                                                                                                                                                
+  - 逻辑过期                                                                                                                                                                       
+  - 永不过期 + 异步刷新                                                                                                                                                            
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 防雪崩组合                                                                                                                                                                    
+                                                                                                                                                                                   
+  - 随机 TTL                                                                                                                                                                       
+  - 分批预热                                                                                                                                                                       
+  - 多级缓存                                                                                                                                                                       
+  - 降级限流                                                                                                                                                                       
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 五、怎么选方案                                                                                                                                                                 
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 1）小项目 / 普通业务                                                                                                                                                          
+                                                                                                                                                                                   
+  够用组合：                                                                                                                                                                       
+                                                                                                                                                                                   
+  - 参数校验                                                                                                                                                                       
+  - 空值缓存                                                                                                                                                                       
+  - 随机 TTL                                                                                                                                                                       
+  - 互斥锁                                                                                                                                                                         
+                                                                                                                                                                                   
+  这是最实用的基础版。                                                                                                                                                             
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 2）中型企业项目                                                                                                                                                               
+                                                                                                                                                                                   
+  推荐组合：                                                                                                                                                                       
+                                                                                                                                                                                   
+  - 参数校验                                                                                                                                                                       
+  - 空值缓存                                                                                                                                                                       
+  - 随机 TTL                                                                                                                                                                       
+  - 热点 key 互斥锁                                                                                                                                                                
+  - 列表缓存删除重建                                                                                                                                                               
+  - 部分接口限流                                                                                                                                                                   
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 3）高并发 / 秒杀 / 大促系统                                                                                                                                                   
+                                                                                                                                                                                   
+  更高级组合：                                                                                                                                                                     
+                                                                                                                                                                                   
+  - 布隆过滤器                                                                                                                                                                     
+  - 本地缓存 + Redis 多级缓存                                                                                                                                                      
+  - 热点 key 永不过期                                                                                                                                                              
+  - 异步刷新                                                                                                                                                                       
+  - 逻辑过期                                                                                                                                                                       
+  - 熔断 / 降级 / 限流                                                                                                                                                             
+  - 消息队列削峰                                                                                                                                                                   
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 六、你可以这样记                                                                                                                                                               
+                                                                                                                                                                                   
+  ## 缓存穿透                                                                                                                                                                      
+                                                                                                                                                                                   
+  查的根本不存在                                                                                                                                                                   
+  解决思路：别让无效请求进 DB                                                                                                                                                      
+                                                                                                                                                                                   
+  常用：                                                                                                                                                                           
+                                                                                                                                                                                   
+  - 空值缓存                                                                                                                                                                       
+  - 布隆过滤器                                                                                                                                                                     
+  - 参数校验                                                                                                                                                                       
+  - 限流                                                                                                                                                                           
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 缓存击穿                                                                                                                                                                      
+                                                                                                                                                                                   
+  热点 key 过期瞬间被打爆                                                                                                                                                          
+  解决思路：别让大量请求同时回源                                                                                                                                                   
+                                                                                                                                                                                   
+  常用：                                                                                                                                                                           
+                                                                                                                                                                                   
+  - 互斥锁                                                                                                                                                                         
+  - 逻辑过期                                                                                                                                                                       
+  - 永不过期 + 异步刷新                                                                                                                                                            
+  - 多级缓存                                                                                                                                                                       
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 缓存雪崩                                                                                                                                                                      
+                                                                                                                                                                                   
+  大量 key 同时过期                                                                                                                                                                
+  解决思路：别让缓存一起挂                                                                                                                                                         
+                                                                                                                                                                                   
+  常用：                                                                                                                                                                           
+                                                                                                                                                                                   
+  - 随机 TTL                                                                                                                                                                       
+  - 分批预热                                                                                                                                                                       
+  - 多级缓存                                                                                                                                                                       
+  - 限流降级                                                                                                                                                                       
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 七、一句话总结                                                                                                                                                                 
+                                                                                                                                                                                   
+  有。                                                                                                                                                                             
+  而且企业项目里通常不是只用一种方案，而是：                                                                                                                                       
+                                                                                                                                                                                   
+  > 基础方案 + 业务场景方案 + 稳定性兜底方案 组合使用。
+
+
+
+1. 布隆过滤器版防穿透 demo                                                                                                                                                       
+  2. 逻辑过期版防击穿 demo                                                                                                                                                         
+                                                                                                                                                                                   
+  都按 Hyperf 常见写法来。                                                                                                                                                         
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 一、布隆过滤器版防穿透 demo                                                                                                                                                    
+                                                                                                                                                                                   
+  ## 1. 思路                                                                                                                                                                       
+                                                                                                                                                                                   
+  目标：                                                                                                                                                                           
+                                                                                                                                                                                   
+  > 在查 Redis / MySQL 之前，先判断这个 ID 是否“可能存在”。                                                                                                                        
+                                                                                                                                                                                   
+  流程：                                                                                                                                                                           
+                                                                                                                                                                                   
+  请求商品ID                                                                                                                                                                       
+    -> 先查布隆过滤器                                                                                                                                                              
+        -> 不存在：直接返回                                                                                                                                                        
+        -> 可能存在：再查 Redis / DB                                                                                                                                               
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 2. 说明                                                                                                                                                                       
+                                                                                                                                                                                   
+  PHP 里真正上生产常见是：                                                                                                                                                         
+                                                                                                                                                                                   
+  - RedisBloom 模块                                                                                                                                                                
+  - 或应用启动时把 ID 集合加载到布隆过滤器                                                                                                                                         
+                                                                                                                                                                                   
+  这里给你一个 demo 版实现，用“集合模拟布隆过滤器思想”，方便先理解。                                                                                                               
+  如果你要 RedisBloom 版，我也可以继续给。                                                                                                                                         
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 3. 布隆过滤器服务（demo版）                                                                                                                                                   
+                                                                                                                                                                                   
+  文件：app/Service/BloomFilterService.php                                                                                                                                         
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  namespace App\Service;                                                                                                                                                           
+                                                                                                                                                                                   
+  /**                                                                                                                                                                              
+   * 布隆过滤器 Demo 版                                                                                                                                                            
+   *                                                                                                                                                                               
+   * 这里为了演示，先用 Redis Set 模拟“存在性预判”。                                                                                                                               
+   * 真正企业高并发项目里，通常会换成 RedisBloom 或专门的 Bloom Filter 实现。                                                                                                      
+   */                                                                                                                                                                              
+  class BloomFilterService                                                                                                                                                         
+  {                                                                                                                                                                                
+      public function __construct(                                                                                                                                                 
+          protected RedisService $redisService                                                                                                                                     
+      ) {                                                                                                                                                                          
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 商品布隆过滤器 key                                                                                                                                                        
+       */                                                                                                                                                                          
+      protected function getProductFilterKey(): string                                                                                                                             
+      {                                                                                                                                                                            
+          return 'bloom:demo_product:ids';                                                                                                                                         
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 初始化商品 ID 集合                                                                                                                                                        
+       *                                                                                                                                                                           
+       * 可在系统启动、定时任务、数据同步时执行                                                                                                                                    
+       */                                                                                                                                                                          
+      public function initProductIds(array $ids): void                                                                                                                             
+      {                                                                                                                                                                            
+          $key = $this->getProductFilterKey();                                                                                                                                     
+          $client = $this->redisService->getClient();                                                                                                                              
+                                                                                                                                                                                   
+          foreach ($ids as $id) {                                                                                                                                                  
+              $client->sAdd($key, (string) $id);                                                                                                                                   
+          }                                                                                                                                                                        
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 判断商品 ID 是否可能存在                                                                                                                                                  
+       */                                                                                                                                                                          
+      public function mightContainProductId(int $id): bool                                                                                                                         
+      {                                                                                                                                                                            
+          return (bool) $this->redisService->getClient()->sIsMember(                                                                                                               
+              $this->getProductFilterKey(),                                                                                                                                        
+              (string) $id                                                                                                                                                         
+          );                                                                                                                                                                       
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 新增商品后补充到过滤器                                                                                                                                                    
+       */                                                                                                                                                                          
+      public function addProductId(int $id): void                                                                                                                                  
+      {                                                                                                                                                                            
+          $this->redisService->getClient()->sAdd(                                                                                                                                  
+              $this->getProductFilterKey(),                                                                                                                                        
+              (string) $id                                                                                                                                                         
+          );                                                                                                                                                                       
+      }                                                                                                                                                                            
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 4. Repository 中接入防穿透                                                                                                                                                    
+                                                                                                                                                                                   
+  文件：app/Repository/DemoProductRepository.php                                                                                                                                   
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  namespace App\Repository;                                                                                                                                                        
+                                                                                                                                                                                   
+  use App\Model\DemoProduct;                                                                                                                                                       
+  use App\Service\BloomFilterService;                                                                                                                                              
+  use App\Service\RedisService;                                                                                                                                                    
+                                                                                                                                                                                   
+  class DemoProductRepository                                                                                                                                                      
+  {                                                                                                                                                                                
+      public function __construct(                                                                                                                                                 
+          protected RedisService $redisService,                                                                                                                                    
+          protected BloomFilterService $bloomFilterService                                                                                                                         
+      ) {                                                                                                                                                                          
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      protected function getDetailCacheKey(int $id): string                                                                                                                        
+      {                                                                                                                                                                            
+          return "demo_product:detail:{$id}";                                                                                                                                      
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 布隆过滤器 + 缓存穿透保护                                                                                                                                                 
+       */                                                                                                                                                                          
+      public function findByIdWithBloom(int $id): ?array                                                                                                                           
+      {                                                                                                                                                                            
+          // 1. 先过“布隆过滤器”                                                                                                                                                   
+          if (! $this->bloomFilterService->mightContainProductId($id)) {                                                                                                           
+              return null;                                                                                                                                                         
+          }                                                                                                                                                                        
+                                                                                                                                                                                   
+          $cacheKey = $this->getDetailCacheKey($id);                                                                                                                               
+                                                                                                                                                                                   
+          // 2. 查缓存                                                                                                                                                             
+          $cached = $this->redisService->get($cacheKey, true);                                                                                                                     
+          if (is_array($cached)) {                                                                                                                                                 
+              return $cached;                                                                                                                                                      
+          }                                                                                                                                                                        
+                                                                                                                                                                                   
+          if ($cached === '__NULL__') {                                                                                                                                            
+              return null;                                                                                                                                                         
+          }                                                                                                                                                                        
+                                                                                                                                                                                   
+          // 3. 查数据库                                                                                                                                                           
+          $product = DemoProduct::query()->find($id);                                                                                                                              
+          if (! $product) {                                                                                                                                                        
+              // 空值缓存，双保险                                                                                                                                                  
+              $this->redisService->set($cacheKey, '__NULL__', 60);                                                                                                                 
+              return null;                                                                                                                                                         
+          }                                                                                                                                                                        
+                                                                                                                                                                                   
+          $data = $product->toArray();                                                                                                                                             
+                                                                                                                                                                                   
+          // 4. 回填缓存                                                                                                                                                           
+          $this->redisService->set($cacheKey, $data, 600);                                                                                                                         
+                                                                                                                                                                                   
+          return $data;                                                                                                                                                            
+      }                                                                                                                                                                            
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 5. 使用示例                                                                                                                                                                   
+                                                                                                                                                                                   
+  例如初始化商品 ID：                                                                                                                                                              
+                                                                                                                                                                                   
+  $this->bloomFilterService->initProductIds([1, 2, 3, 4, 5]);                                                                                                                      
+                                                                                                                                                                                   
+  查商品：                                                                                                                                                                         
+                                                                                                                                                                                   
+  $product = $this->repository->findByIdWithBloom(99999);                                                                                                                          
+                                                                                                                                                                                   
+  如果 99999 不在“布隆过滤器”里，会直接返回 null，不查数据库。                                                                                                                     
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 二、逻辑过期版防击穿 demo                                                                                                                                                      
+                                                                                                                                                                                   
+  ## 1. 思路                                                                                                                                                                       
+                                                                                                                                                                                   
+  逻辑过期的核心不是 Redis 真过期，而是：                                                                                                                                          
+                                                                                                                                                                                   
+  > 缓存数据里自己带一个 expire_at                                                                                                                                                 
+                                                                                                                                                                                   
+  例如缓存值：                                                                                                                                                                     
+                                                                                                                                                                                   
+  {                                                                                                                                                                                
+    "data": {...},                                                                                                                                                                 
+    "expire_at": 1760000000                                                                                                                                                        
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  读取时：                                                                                                                                                                         
+                                                                                                                                                                                   
+  - 没过期：直接返回                                                                                                                                                               
+  - 过期了：先返回旧数据                                                                                                                                                           
+  - 同时由一个线程异步重建缓存                                                                                                                                                     
+                                                                                                                                                                                   
+  这就能避免热点 key 一过期，所有请求都打数据库。                                                                                                                                  
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 2. 逻辑过期 Repository demo                                                                                                                                                   
+                                                                                                                                                                                   
+  文件：app/Repository/DemoProductLogicExpireRepository.php                                                                                                                        
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  namespace App\Repository;                                                                                                                                                        
+                                                                                                                                                                                   
+  use App\Model\DemoProduct;                                                                                                                                                       
+  use App\Service\RedisService;                                                                                                                                                    
+  use Hyperf\Coroutine\Coroutine;                                                                                                                                                  
+                                                                                                                                                                                   
+  class DemoProductLogicExpireRepository                                                                                                                                           
+  {                                                                                                                                                                                
+      public function __construct(                                                                                                                                                 
+          protected RedisService $redisService                                                                                                                                     
+      ) {                                                                                                                                                                          
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      protected function getDetailCacheKey(int $id): string                                                                                                                        
+      {                                                                                                                                                                            
+          return "demo_product:logic_expire:detail:{$id}";                                                                                                                         
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      protected function getMutexKey(int $id): string                                                                                                                              
+      {                                                                                                                                                                            
+          return "demo_product:logic_expire:mutex:{$id}";                                                                                                                          
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 预热缓存：写入逻辑过期结构                                                                                                                                                
+       */                                                                                                                                                                          
+      public function warmUp(int $id, int $ttl = 600): ?array                                                                                                                      
+      {                                                                                                                                                                            
+          $product = DemoProduct::query()->find($id);                                                                                                                              
+                                                                                                                                                                                   
+          if (! $product) {                                                                                                                                                        
+              return null;                                                                                                                                                         
+          }                                                                                                                                                                        
+                                                                                                                                                                                   
+          $payload = [                                                                                                                                                             
+              'data' => $product->toArray(),                                                                                                                                       
+              'expire_at' => time() + $ttl,                                                                                                                                        
+          ];                                                                                                                                                                       
+                                                                                                                                                                                   
+          $this->redisService->set($this->getDetailCacheKey($id), $payload, 3600);                                                                                                 
+                                                                                                                                                                                   
+          return $payload['data'];                                                                                                                                                 
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 逻辑过期读取                                                                                                                                                              
+       */                                                                                                                                                                          
+      public function findByIdWithLogicExpire(int $id): ?array                                                                                                                     
+      {                                                                                                                                                                            
+          $cacheKey = $this->getDetailCacheKey($id);                                                                                                                               
+                                                                                                                                                                                   
+          $cached = $this->redisService->get($cacheKey, true);                                                                                                                     
+                                                                                                                                                                                   
+          if (! is_array($cached) || ! isset($cached['data'], $cached['expire_at'])) {                                                                                             
+              // 没有缓存，直接重建一次                                                                                                                                            
+              return $this->rebuildCache($id);                                                                                                                                     
+          }                                                                                                                                                                        
+                                                                                                                                                                                   
+          $data = $cached['data'];                                                                                                                                                 
+          $expireAt = (int) $cached['expire_at'];                                                                                                                                  
+                                                                                                                                                                                   
+          // 1. 没过期，直接返回                                                                                                                                                   
+          if ($expireAt > time()) {                                                                                                                                                
+              return $data;                                                                                                                                                        
+          }                                                                                                                                                                        
+                                                                                                                                                                                   
+          // 2. 逻辑过期：尝试抢锁重建缓存                                                                                                                                         
+          $lockKey = $this->getMutexKey($id);                                                                                                                                      
+          $locked = $this->redisService->getClient()->set($lockKey, 1, ['nx', 'ex' => 5]);                                                                                         
+                                                                                                                                                                                   
+          if ($locked) {                                                                                                                                                           
+              // 只让一个协程异步重建                                                                                                                                              
+              Coroutine::create(function () use ($id, $lockKey) {                                                                                                                  
+                  try {                                                                                                                                                            
+                      $this->rebuildCache($id);                                                                                                                                    
+                  } finally {                                                                                                                                                      
+                      $this->redisService->delete($lockKey);                                                                                                                       
+                  }                                                                                                                                                                
+              });                                                                                                                                                                  
+          }                                                                                                                                                                        
+                                                                                                                                                                                   
+          // 3. 即使过期，也先返回旧数据                                                                                                                                           
+          return $data;                                                                                                                                                            
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 重建缓存                                                                                                                                                                  
+       */                                                                                                                                                                          
+      protected function rebuildCache(int $id, int $ttl = 600): ?array                                                                                                             
+      {                                                                                                                                                                            
+          $product = DemoProduct::query()->find($id);                                                                                                                              
+                                                                                                                                                                                   
+          if (! $product) {                                                                                                                                                        
+              return null;                                                                                                                                                         
+          }                                                                                                                                                                        
+                                                                                                                                                                                   
+          $data = $product->toArray();                                                                                                                                             
+                                                                                                                                                                                   
+          $payload = [                                                                                                                                                             
+              'data' => $data,                                                                                                                                                     
+              'expire_at' => time() + $ttl,                                                                                                                                        
+          ];                                                                                                                                                                       
+                                                                                                                                                                                   
+          $this->redisService->set($this->getDetailCacheKey($id), $payload, 3600);                                                                                                 
+                                                                                                                                                                                   
+          return $data;                                                                                                                                                            
+      }                                                                                                                                                                            
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 3. 逻辑过期的特点                                                                                                                                                             
+                                                                                                                                                                                   
+  ### 优点                                                                                                                                                                         
+                                                                                                                                                                                   
+  - 热点 key 不会因为真实过期而瞬间击穿                                                                                                                                            
+  - 用户始终能拿到旧数据，不容易超时                                                                                                                                               
+  - 适合热点详情页                                                                                                                                                                 
+                                                                                                                                                                                   
+  ### 缺点                                                                                                                                                                         
+                                                                                                                                                                                   
+  - 可能短时间返回旧数据                                                                                                                                                           
+  - 实现比普通缓存复杂                                                                                                                                                             
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 三、两种方案的对比                                                                                                                                                             
+                                                                                                                                                                                   
+  ## 布隆过滤器防穿透                                                                                                                                                              
+                                                                                                                                                                                   
+  解决：                                                                                                                                                                           
+                                                                                                                                                                                   
+  > 查的 key 根本不存在                                                                                                                                                            
+                                                                                                                                                                                   
+  适合：                                                                                                                                                                           
+                                                                                                                                                                                   
+  - 用户 ID                                                                                                                                                                        
+  - 商品 ID                                                                                                                                                                        
+  - 文章 ID                                                                                                                                                                        
+  - 主键型查询                                                                                                                                                                     
+                                                                                                                                                                                   
+  核心作用：                                                                                                                                                                       
+                                                                                                                                                                                   
+  > 在 Redis / DB 之前拦掉无效请求                                                                                                                                                 
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 逻辑过期防击穿                                                                                                                                                                
+                                                                                                                                                                                   
+  解决：                                                                                                                                                                           
+                                                                                                                                                                                   
+  > 热点 key 过期时大量请求回源数据库                                                                                                                                              
+                                                                                                                                                                                   
+  适合：                                                                                                                                                                           
+                                                                                                                                                                                   
+  - 热点商品详情                                                                                                                                                                   
+  - 热门文章详情                                                                                                                                                                   
+  - 访问量极高的详情页                                                                                                                                                             
+                                                                                                                                                                                   
+  核心作用：                                                                                                                                                                       
+                                                                                                                                                                                   
+  > 即使“逻辑上过期”，也先返回旧值，再异步更新                                                                                                                                     
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 四、企业项目里的组合方式                                                                                                                                                       
+                                                                                                                                                                                   
+  企业里通常不是只用一个，而是组合：                                                                                                                                               
+                                                                                                                                                                                   
+  ## 商品详情页常见组合                                                                                                                                                            
+                                                                                                                                                                                   
+  - 参数校验                                                                                                                                                                       
+  - 布隆过滤器                                                                                                                                                                     
+  - 空值缓存                                                                                                                                                                       
+  - 逻辑过期                                                                                                                                                                       
+  - 互斥锁                                                                                                                                                                         
+                                                                                                                                                                                   
+  也就是：                                                                                                                                                                         
+                                                                                                                                                                                   
+  ### 防穿透                                                                                                                                                                       
+                                                                                                                                                                                   
+  - 布隆过滤器                                                                                                                                                                     
+  - 空值缓存                                                                                                                                                                       
+                                                                                                                                                                                   
+  ### 防击穿                                                                                                                                                                       
+                                                                                                                                                                                   
+  - 逻辑过期                                                                                                                                                                       
+  - 互斥锁                                                                                                                                                                         
+                                                                                                                                                                                   
+  ### 防雪崩                                                                                                                                                                       
+                                                                                                                                                                                   
+  - 随机 TTL                                                                                                                                                                       
+  - 分批预热                                                                                                                                                                       
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 五、一句话总结                                                                                                                                                                 
+                                                                                                                                                                                   
+  ## 布隆过滤器版防穿透                                                                                                                                                            
+                                                                                                                                                                                   
+  > 先判断这个 ID 有没有资格进缓存/数据库                                                                                                                                          
+                                                                                                                                                                                   
+  ## 逻辑过期版防击穿                                                                                                                                                              
+                                                                                                                                                                                   
+  > 数据过期也先返回旧值，只让一个线程去重建缓存
+
+
+
+# 一、生产里怎么用                                                                                                                                                               
+                                                                                                                                                                                   
+  目标：                                                                                                                                                                           
+                                                                                                                                                                                   
+  > 在查 Redis 缓存 / MySQL 之前，先用 RedisBloom 判断这个 ID “是否可能存在”。                                                                                                     
+                                                                                                                                                                                   
+  流程：                                                                                                                                                                           
+                                                                                                                                                                                   
+  请求商品ID                                                                                                                                                                       
+    -> BF.EXISTS 判断                                                                                                                                                              
+        -> 不存在：直接返回 null                                                                                                                                                   
+        -> 可能存在：继续查缓存 / 查库                                                                                                                                             
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 二、为什么生产里推荐 RedisBloom                                                                                                                                                
+                                                                                                                                                                                   
+  比“用 Redis Set 模拟”更适合大数据量场景：                                                                                                                                        
+                                                                                                                                                                                   
+  - 内存占用小                                                                                                                                                                     
+  - 查询快                                                                                                                                                                         
+  - 支持海量 ID                                                                                                                                                                    
+  - 非常适合“存在性预判”                                                                                                                                                           
+                                                                                                                                                                                   
+  注意：                                                                                                                                                                           
+                                                                                                                                                                                   
+  - Bloom Filter 只适合判断“可能存在 / 一定不存在”                                                                                                                                 
+  - 会有误判：可能把不存在判成“可能存在”                                                                                                                                           
+  - 不会漏判已存在数据                                                                                                                                                             
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 三、Hyperf 里怎么调 RedisBloom 命令                                                                                                                                            
+                                                                                                                                                                                   
+  Hyperf\Redis\Redis 本质上是 Redis 客户端代理，生产里最稳妥的方式通常直接调：                                                                                                     
+                                                                                                                                                                                   
+  $redis->rawCommand(...)                                                                                                                                                          
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 四、RedisBloom Service                                                                                                                                                         
+                                                                                                                                                                                   
+  文件：app/Service/RedisBloomService.php                                                                                                                                          
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  namespace App\Service;                                                                                                                                                           
+                                                                                                                                                                                   
+  use Hyperf\Di\Annotation\Inject;                                                                                                                                                 
+  use Hyperf\Redis\Redis;                                                                                                                                                          
+                                                                                                                                                                                   
+  class RedisBloomService                                                                                                                                                          
+  {                                                                                                                                                                                
+      #[Inject]                                                                                                                                                                    
+      protected Redis $redis;                                                                                                                                                      
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 初始化 Bloom Filter                                                                                                                                                       
+       *                                                                                                                                                                           
+       * @param string $key Bloom Filter key                                                                                                                                       
+       * @param float $errorRate 误判率，例如 0.001                                                                                                                                
+       * @param int $capacity 预计容量，例如 100000                                                                                                                                
+       */                                                                                                                                                                          
+      public function reserve(string $key, float $errorRate = 0.001, int $capacity = 100000): bool                                                                                 
+      {                                                                                                                                                                            
+          $result = $this->redis->rawCommand('BF.RESERVE', $key, (string) $errorRate, (string) $capacity);                                                                         
+                                                                                                                                                                                   
+          return $result === 'OK';                                                                                                                                                 
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 添加单个元素                                                                                                                                                              
+       */                                                                                                                                                                          
+      public function add(string $key, string|int $item): bool                                                                                                                     
+      {                                                                                                                                                                            
+          $result = $this->redis->rawCommand('BF.ADD', $key, (string) $item);                                                                                                      
+                                                                                                                                                                                   
+          return (bool) $result;                                                                                                                                                   
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 批量添加元素                                                                                                                                                              
+       */                                                                                                                                                                          
+      public function madd(string $key, array $items): array                                                                                                                       
+      {                                                                                                                                                                            
+          $args = array_merge(['BF.MADD', $key], array_map('strval', $items));                                                                                                     
+                                                                                                                                                                                   
+          return $this->redis->rawCommand(...$args);                                                                                                                               
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 判断元素是否可能存在                                                                                                                                                      
+       *                                                                                                                                                                           
+       * 返回：                                                                                                                                                                    
+       * - true：可能存在                                                                                                                                                          
+       * - false：一定不存在                                                                                                                                                       
+       */                                                                                                                                                                          
+      public function exists(string $key, string|int $item): bool                                                                                                                  
+      {                                                                                                                                                                            
+          $result = $this->redis->rawCommand('BF.EXISTS', $key, (string) $item);                                                                                                   
+                                                                                                                                                                                   
+          return (bool) $result;                                                                                                                                                   
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 批量判断                                                                                                                                                                  
+       */                                                                                                                                                                          
+      public function mexists(string $key, array $items): array                                                                                                                    
+      {                                                                                                                                                                            
+          $args = array_merge(['BF.MEXISTS', $key], array_map('strval', $items));                                                                                                  
+                                                                                                                                                                                   
+          return $this->redis->rawCommand(...$args);                                                                                                                               
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 查看布隆过滤器信息                                                                                                                                                        
+       */                                                                                                                                                                          
+      public function info(string $key): mixed                                                                                                                                     
+      {                                                                                                                                                                            
+          return $this->redis->rawCommand('BF.INFO', $key);                                                                                                                        
+      }                                                                                                                                                                            
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 五、初始化商品 ID 到 Bloom Filter                                                                                                                                              
+                                                                                                                                                                                   
+  生产里一般在：                                                                                                                                                                   
+                                                                                                                                                                                   
+  - 定时任务                                                                                                                                                                       
+  - 启动初始化脚本                                                                                                                                                                 
+  - 数据同步任务                                                                                                                                                                   
+  - 管理后台刷新任务                                                                                                                                                               
+                                                                                                                                                                                   
+  里做。                                                                                                                                                                           
+                                                                                                                                                                                   
+  文件：app/Service/ProductBloomInitService.php                                                                                                                                    
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  namespace App\Service;                                                                                                                                                           
+                                                                                                                                                                                   
+  use App\Model\DemoProduct;                                                                                                                                                       
+                                                                                                                                                                                   
+  class ProductBloomInitService                                                                                                                                                    
+  {                                                                                                                                                                                
+      public function __construct(                                                                                                                                                 
+          protected RedisBloomService $bloomService                                                                                                                                
+      ) {                                                                                                                                                                          
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 商品 Bloom Filter key                                                                                                                                                     
+       */                                                                                                                                                                          
+      protected function getBloomKey(): string                                                                                                                                     
+      {                                                                                                                                                                            
+          return 'bf:demo_product:ids';                                                                                                                                            
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 初始化商品 ID 布隆过滤器                                                                                                                                                  
+       */                                                                                                                                                                          
+      public function init(): array                                                                                                                                                
+      {                                                                                                                                                                            
+          $key = $this->getBloomKey();                                                                                                                                             
+                                                                                                                                                                                   
+          // 先创建过滤器                                                                                                                                                          
+          $this->bloomService->reserve($key, 0.001, 100000);                                                                                                                       
+                                                                                                                                                                                   
+          // 查询数据库已有商品 ID                                                                                                                                                 
+          $ids = DemoProduct::query()->pluck('id')->toArray();                                                                                                                     
+                                                                                                                                                                                   
+          if (! empty($ids)) {                                                                                                                                                     
+              $this->bloomService->madd($key, $ids);                                                                                                                               
+          }                                                                                                                                                                        
+                                                                                                                                                                                   
+          return [                                                                                                                                                                 
+              'key' => $key,                                                                                                                                                       
+              'count' => count($ids),                                                                                                                                              
+          ];                                                                                                                                                                       
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 新增商品后，把 ID 加进 Bloom Filter                                                                                                                                       
+       */                                                                                                                                                                          
+      public function addOne(int $id): bool                                                                                                                                        
+      {                                                                                                                                                                            
+          return $this->bloomService->add($this->getBloomKey(), $id);                                                                                                              
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 判断商品 ID 是否可能存在                                                                                                                                                  
+       */                                                                                                                                                                          
+      public function mightContain(int $id): bool                                                                                                                                  
+      {                                                                                                                                                                            
+          return $this->bloomService->exists($this->getBloomKey(), $id);                                                                                                           
+      }                                                                                                                                                                            
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 六、Repository 接入生产版防穿透                                                                                                                                                
+                                                                                                                                                                                   
+  文件：app/Repository/DemoProductRepository.php                                                                                                                                   
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  namespace App\Repository;                                                                                                                                                        
+                                                                                                                                                                                   
+  use App\Model\DemoProduct;                                                                                                                                                       
+  use App\Service\ProductBloomInitService;                                                                                                                                         
+  use App\Service\RedisService;                                                                                                                                                    
+                                                                                                                                                                                   
+  class DemoProductRepository                                                                                                                                                      
+  {                                                                                                                                                                                
+      public function __construct(                                                                                                                                                 
+          protected RedisService $redisService,                                                                                                                                    
+          protected ProductBloomInitService $bloomInitService                                                                                                                      
+      ) {                                                                                                                                                                          
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      protected function getDetailCacheKey(int $id): string                                                                                                                        
+      {                                                                                                                                                                            
+          return "demo_product:detail:{$id}";                                                                                                                                      
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 使用 RedisBloom 防缓存穿透                                                                                                                                                
+       */                                                                                                                                                                          
+      public function findByIdWithBloom(int $id): ?array                                                                                                                           
+      {                                                                                                                                                                            
+          // 1. 先走 Bloom Filter                                                                                                                                                  
+          if (! $this->bloomInitService->mightContain($id)) {                                                                                                                      
+              return null;                                                                                                                                                         
+          }                                                                                                                                                                        
+                                                                                                                                                                                   
+          $cacheKey = $this->getDetailCacheKey($id);                                                                                                                               
+                                                                                                                                                                                   
+          // 2. 查详情缓存                                                                                                                                                         
+          $cached = $this->redisService->get($cacheKey, true);                                                                                                                     
+          if (is_array($cached)) {                                                                                                                                                 
+              return $cached;                                                                                                                                                      
+          }                                                                                                                                                                        
+                                                                                                                                                                                   
+          if ($cached === '__NULL__') {                                                                                                                                            
+              return null;                                                                                                                                                         
+          }                                                                                                                                                                        
+                                                                                                                                                                                   
+          // 3. 查数据库                                                                                                                                                           
+          $product = DemoProduct::query()->find($id);                                                                                                                              
+          if (! $product) {                                                                                                                                                        
+              // 双保险：空值缓存                                                                                                                                                  
+              $this->redisService->set($cacheKey, '__NULL__', 60);                                                                                                                 
+              return null;                                                                                                                                                         
+          }                                                                                                                                                                        
+                                                                                                                                                                                   
+          $data = $product->toArray();                                                                                                                                             
+                                                                                                                                                                                   
+          // 4. 回填缓存                                                                                                                                                           
+          $this->redisService->set($cacheKey, $data, 600);                                                                                                                         
+                                                                                                                                                                                   
+          return $data;                                                                                                                                                            
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 新增商品                                                                                                                                                                  
+       */                                                                                                                                                                          
+      public function create(array $data): array                                                                                                                                   
+      {                                                                                                                                                                            
+          $product = DemoProduct::query()->create($data);                                                                                                                          
+                                                                                                                                                                                   
+          // 新增成功后同步加入 Bloom Filter                                                                                                                                       
+          $this->bloomInitService->addOne((int) $product->id);                                                                                                                     
+                                                                                                                                                                                   
+          return $product->toArray();                                                                                                                                              
+      }                                                                                                                                                                            
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 七、Controller demo                                                                                                                                                            
+                                                                                                                                                                                   
+  文件：app/Controller/ProductBloomController.php                                                                                                                                  
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  namespace App\Controller;                                                                                                                                                        
+                                                                                                                                                                                   
+  use App\Repository\DemoProductRepository;                                                                                                                                        
+  use App\Service\ProductBloomInitService;                                                                                                                                         
+  use Hyperf\HttpServer\Annotation\Controller;                                                                                                                                     
+  use Hyperf\HttpServer\Annotation\GetMapping;                                                                                                                                     
+  use Hyperf\HttpServer\Annotation\PostMapping;                                                                                                                                    
+                                                                                                                                                                                   
+  #[Controller(prefix: 'product-bloom')]                                                                                                                                           
+  class ProductBloomController                                                                                                                                                     
+  {                                                                                                                                                                                
+      public function __construct(                                                                                                                                                 
+          protected ProductBloomInitService $bloomInitService,                                                                                                                     
+          protected DemoProductRepository $repository                                                                                                                              
+      ) {                                                                                                                                                                          
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 初始化 Bloom Filter                                                                                                                                                       
+       */                                                                                                                                                                          
+      #[PostMapping('init')]                                                                                                                                                       
+      public function init(): array                                                                                                                                                
+      {                                                                                                                                                                            
+          return [                                                                                                                                                                 
+              'code' => 0,                                                                                                                                                         
+              'message' => 'Bloom Filter 初始化成功',                                                                                                                              
+              'data' => $this->bloomInitService->init(),                                                                                                                           
+          ];                                                                                                                                                                       
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 查询商品详情（带 RedisBloom 防穿透）                                                                                                                                      
+       */                                                                                                                                                                          
+      #[GetMapping('detail/{id:\d+}')]                                                                                                                                             
+      public function detail(int $id): array                                                                                                                                       
+      {                                                                                                                                                                            
+          return [                                                                                                                                                                 
+              'code' => 0,                                                                                                                                                         
+              'message' => 'success',                                                                                                                                              
+              'data' => $this->repository->findByIdWithBloom($id),                                                                                                                 
+          ];                                                                                                                                                                       
+      }                                                                                                                                                                            
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 八、生产里怎么初始化                                                                                                                                                           
+                                                                                                                                                                                   
+  ## 方式 1：接口初始化                                                                                                                                                            
+                                                                                                                                                                                   
+  POST /product-bloom/init                                                                                                                                                         
+                                                                                                                                                                                   
+  ## 方式 2：命令行/定时任务初始化                                                                                                                                                 
+                                                                                                                                                                                   
+  更推荐做成：                                                                                                                                                                     
+                                                                                                                                                                                   
+  - Command                                                                                                                                                                        
+  - Crontab                                                                                                                                                                        
+  - 数据同步 Job                                                                                                                                                                   
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 九、关键参数怎么选                                                                                                                                                             
+                                                                                                                                                                                   
+  ## BF.RESERVE key errorRate capacity                                                                                                                                             
+                                                                                                                                                                                   
+  例如：                                                                                                                                                                           
+                                                                                                                                                                                   
+  BF.RESERVE bf:demo_product:ids 0.001 100000                                                                                                                                      
+                                                                                                                                                                                   
+  含义：                                                                                                                                                                           
+                                                                                                                                                                                   
+  - 0.001：误判率千分之一                                                                                                                                                          
+  - 100000：预计容量 10 万                                                                                                                                                         
+                                                                                                                                                                                   
+  官方文档说明，建议按预计容量预留；容量估计越准确，性能和内存更稳定。                                                                                                             
+  参考：BF.RESERVE 文档                                                                                                                                                            
+  https://redis.io/docs/latest/commands/bf.reserve/                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 十、生产建议                                                                                                                                                                   
+                                                                                                                                                                                   
+  ## 1）Bloom Filter 适合主键型存在性判断                                                                                                                                          
+                                                                                                                                                                                   
+  例如：                                                                                                                                                                           
+                                                                                                                                                                                   
+  - 商品 ID                                                                                                                                                                        
+  - 用户 ID                                                                                                                                                                        
+  - 文章 ID                                                                                                                                                                        
+                                                                                                                                                                                   
+  ## 2）新增数据后要同步 add                                                                                                                                                       
+                                                                                                                                                                                   
+  否则会出现：                                                                                                                                                                     
+                                                                                                                                                                                   
+  - 数据库里已经有                                                                                                                                                                 
+  - Bloom Filter 里还没有                                                                                                                                                          
+  - 被误判为不存在                                                                                                                                                                 
+                                                                                                                                                                                   
+  ## 3）删除数据一般不建议频繁从 Bloom Filter 移除                                                                                                                                 
+                                                                                                                                                                                   
+  因为标准 Bloom Filter 不支持删除。                                                                                                                                               
+  所以它更适合：                                                                                                                                                                   
+                                                                                                                                                                                   
+  - “新增多、删除少”                                                                                                                                                               
+  - 或“允许少量历史误判”的业务                                                                                                                                                     
+                                                                                                                                                                                   
+  如果你需要“可删除”，就更适合看 Cuckoo Filter，也是 RedisBloom 里的能力。                                                                                                         
+                                                                                                                                                                                   
+  ## 4）最好配合空值缓存双保险                                                                                                                                                     
+                                                                                                                                                                                   
+  即便用了 Bloom Filter，也建议对查库为空的情况做短 TTL 空值缓存。                                                                                                                 
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 十一、和 demo 版 Set 模拟的区别                                                                                                                                                
+                                                                                                                                                                                   
+  ## Set 模拟版                                                                                                                                                                    
+                                                                                                                                                                                   
+  - 准确                                                                                                                                                                           
+  - 能删                                                                                                                                                                           
+  - 实现简单                                                                                                                                                                       
+  - 占内存更大                                                                                                                                                                     
+                                                                                                                                                                                   
+  ## RedisBloom 生产版                                                                                                                                                             
+                                                                                                                                                                                   
+  - 更省内存                                                                                                                                                                       
+  - 更适合海量 ID                                                                                                                                                                  
+  - 有误判率                                                                                                                                                                       
+  - 标准 Bloom 不支持删除                                                                                                                                                          
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 十二、一句话总结                                                                                                                                                               
+                                                                                                                                                                                   
+  生产版 RedisBloom 的核心就是：                                                                                                                                                   
+                                                                                                                                                                                   
+  > 用 BF.RESERVE 建过滤器，用 BF.ADD / BF.MADD 灌入 ID，用 BF.EXISTS 在查缓存/数据库前做存在性预判。                                                                              
+                                                                                                                                                                                   
+  ———
+

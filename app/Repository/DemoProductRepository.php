@@ -7,14 +7,6 @@ namespace App\Repository;
 use App\Model\DemoProduct;
 use App\Service\RedisService;
 
-/**
- * Repository 负责：
- *
- * - 查数据库
- * - 查缓存
- * - 回填缓存
- * - 更新后删缓存
- */
 class DemoProductRepository
 {
     public function __construct(
@@ -22,93 +14,104 @@ class DemoProductRepository
     ) {
     }
 
-    /**
-     * 商品详情缓存 key
-     */
     protected function getDetailCacheKey(int $id): string
     {
         return "demo_product:detail:{$id}";
     }
 
-    /**
-     * 查询商品详情：先查缓存，没有再查数据库
-     */
-    public function findByIdWithCache(int $id): ?array
+    protected function getListCacheKey(): string
     {
-        $cacheKey = $this->getDetailCacheKey($id);
+        return 'demo_product:list:all';
+    }
 
-        // 1. 先查缓存
+    protected function getMutexKey(int $id): string
+    {
+        return "demo_product:mutex:{$id}";
+    }
+
+    /**
+     * 随机 TTL，缓解缓存雪崩
+     */
+    protected function randomTtl(int $base): int
+    {
+        return $base + random_int(30, 180);
+    }
+
+    /**
+     * 列表缓存
+     */
+    public function getAllWithCache(): array
+    {
+        $cacheKey = $this->getListCacheKey();
         $cached = $this->redisService->get($cacheKey, true);
-        if ($cached !== null) {
+
+        if (is_array($cached)) {
             return $cached;
         }
 
-        // 2. 缓存没有，查数据库
-        $product = DemoProduct::query()->find($id);
-        if (! $product) {
-            return null;
-        }
+        $data = DemoProduct::query()
+            ->where('status', 1)
+            ->orderByDesc('id')
+            ->get()
+            ->toArray();
 
-        $data = $product->toArray();
-
-        // 3. 回填缓存，缓存 10 分钟
-        $this->redisService->set($cacheKey, $data, 600);
+        $this->redisService->set($cacheKey, $data, $this->randomTtl(300));
 
         return $data;
     }
 
     /**
-     * 查询全部商品（这里演示直接查库，不做列表缓存）
+     * 详情缓存 + 穿透 + 击穿 + 雪崩保护
      */
-    public function getAll(): array
+    public function findByIdWithCache(int $id): ?array
     {
-        return DemoProduct::query()
-            ->orderByDesc('id')
-            ->get()
-            ->toArray();
-    }
+        $cacheKey = $this->getDetailCacheKey($id);
+        $cached = $this->redisService->get($cacheKey, true);
 
-    /**
-     * 新增商品
-     */
-    public function create(array $data): DemoProduct
-    {
-        return DemoProduct::query()->create($data);
-    }
-
-    /**
-     * 更新商品
-     *
-     * 先更新数据库，再删缓存
-     */
-    public function updateById(int $id, array $data): bool
-    {
-        $result = (bool) DemoProduct::query()
-            ->where('id', $id)
-            ->update($data);
-
-        if ($result) {
-            $this->redisService->delete($this->getDetailCacheKey($id));
+        // 命中正常缓存
+        if (is_array($cached)) {
+            return $cached;
         }
 
-        return $result;
-    }
-
-    /**
-     * 删除商品
-     *
-     * 先删数据库，再删缓存
-     */
-    public function deleteById(int $id): bool
-    {
-        $result = (bool) DemoProduct::query()
-            ->where('id', $id)
-            ->delete();
-
-        if ($result) {
-            $this->redisService->delete($this->getDetailCacheKey($id));
+        // 命中空值缓存，防穿透
+        if ($cached === '__NULL__') {
+            return null;
         }
 
-        return $result;
+        $lockKey = $this->getMutexKey($id);
+        $locked = $this->redisService->getClient()->set($lockKey, 1, ['nx', 'ex' => 5]);
+
+        if (! $locked) {
+            usleep(100 * 1000);
+
+            $retry = $this->redisService->get($cacheKey, true);
+
+            if (is_array($retry)) {
+                return $retry;
+            }
+
+            if ($retry === '__NULL__') {
+                return null;
+            }
+        }
+
+        try {
+            $product = DemoProduct::query()->find($id);
+
+            // 空值缓存，防穿透
+            if (! $product) {
+                $this->redisService->set($cacheKey, '__NULL__', 60);
+                return null;
+            }
+
+            $data = $product->toArray();
+
+            // 随机 TTL，防雪崩
+            $this->redisService->set($cacheKey, $data, $this->randomTtl(600));
+
+            return $data;
+        } finally {
+            $this->redisService->delete($lockKey);
+        }
     }
 }
