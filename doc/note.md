@@ -7362,3 +7362,810 @@ return [
   - 系统异常兜底                                                                                                                                                                   
   - 返回格式可统一                                                                                                                                                                 
   - 适合中大型项目
+
+
+# 一、为什么建议新建 demo 表                                                                                                                                                     
+                                                                                                                                                                                   
+  好处：                                                                                                                                                                           
+                                                                                                                                                                                   
+  - 不污染现有业务表                                                                                                                                                               
+  - 可以随便增删改查做实验                                                                                                                                                         
+  - 结构简单，适合学习                                                                                                                                                             
+  - 后面你要练分页、条件查询、排序、软删除也方便扩展                                                                                                                               
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 二、Demo 表 SQL                                                                                                                                                                
+                                                                                                                                                                                   
+  你可以新建这张表：                                                                                                                                                               
+                                                                                                                                                                                   
+  DROP TABLE IF EXISTS `demo_users`;                                                                                                                                               
+                                                                                                                                                                                   
+  CREATE TABLE `demo_users` (                                                                                                                                                      
+    `id` bigint UNSIGNED NOT NULL AUTO_INCREMENT,                                                                                                                                  
+    `username` varchar(50) NOT NULL COMMENT '用户名',                                                                                                                              
+    `email` varchar(100) NOT NULL COMMENT '邮箱',                                                                                                                                  
+    `age` tinyint UNSIGNED NOT NULL DEFAULT 0 COMMENT '年龄',                                                                                                                      
+    `status` tinyint NOT NULL DEFAULT 1 COMMENT '状态：1正常 0禁用',                                                                                                               
+    `created_at` datetime DEFAULT NULL,                                                                                                                                            
+    `updated_at` datetime DEFAULT NULL,                                                                                                                                            
+    PRIMARY KEY (`id`)                                                                                                                                                             
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;                                                                                                                                         
+                                                                                                                                                                                   
+  插入测试数据：                                                                                                                                                                   
+                                                                                                                                                                                   
+  INSERT INTO `demo_users` (`username`, `email`, `age`, `status`, `created_at`, `updated_at`) VALUES                                                                               
+  ('zhangsan', 'zhangsan@example.com', 18, 1, NOW(), NOW()),                                                                                                                       
+  ('lisi', 'lisi@example.com', 22, 1, NOW(), NOW()),                                                                                                                               
+  ('wangwu', 'wangwu@example.com', 30, 0, NOW(), NOW());                                                                                                                           
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 三、为什么这张表适合 demo                                                                                                                                                      
+                                                                                                                                                                                   
+  因为它比 users 表多了几个更适合练习的字段：                                                                                                                                      
+                                                                                                                                                                                   
+  - username                                                                                                                                                                       
+  - email                                                                                                                                                                          
+  - age                                                                                                                                                                            
+  - status                                                                                                                                                                         
+                                                                                                                                                                                   
+  这样你可以练：                                                                                                                                                                   
+                                                                                                                                                                                   
+  - 条件查询                                                                                                                                                                       
+  - 排序                                                                                                                                                                           
+  - 范围查询                                                                                                                                                                       
+  - 状态筛选                                                                                                                                                                       
+  - 批量查询                                                                                                                                                                       
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 四、ORM Demo                                                                                                                                                                   
+                                                                                                                                                                                   
+  ## 1）模型                                                                                                                                                                       
+                                                                                                                                                                                   
+  文件：app/Model/DemoUser.php                                                                                                                                                     
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  namespace App\Model;                                                                                                                                                             
+                                                                                                                                                                                   
+  use Hyperf\DbConnection\Model\Model;                                                                                                                                             
+                                                                                                                                                                                   
+  /**                                                                                                                                                                              
+   * DemoUser 模型                                                                                                                                                                 
+   *                                                                                                                                                                               
+   * 对应表：demo_users                                                                                                                                                            
+   */                                                                                                                                                                              
+  class DemoUser extends Model                                                                                                                                                     
+  {                                                                                                                                                                                
+      /**                                                                                                                                                                          
+       * 表名                                                                                                                                                                      
+       */                                                                                                                                                                          
+      protected ?string $table = 'demo_users';                                                                                                                                     
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 可批量赋值字段                                                                                                                                                            
+       */                                                                                                                                                                          
+      protected array $fillable = [                                                                                                                                                
+          'username',                                                                                                                                                              
+          'email',                                                                                                                                                                 
+          'age',                                                                                                                                                                   
+          'status',                                                                                                                                                                
+          'created_at',                                                                                                                                                            
+          'updated_at',                                                                                                                                                            
+      ];                                                                                                                                                                           
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 2）ORM Service                                                                                                                                                                
+                                                                                                                                                                                   
+  文件：app/Service/DemoUserOrmService.php                                                                                                                                         
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  namespace App\Service;                                                                                                                                                           
+                                                                                                                                                                                   
+  use App\Model\DemoUser;                                                                                                                                                          
+                                                                                                                                                                                   
+  class DemoUserOrmService                                                                                                                                                         
+  {                                                                                                                                                                                
+      /**                                                                                                                                                                          
+       * 查询全部用户                                                                                                                                                              
+       */                                                                                                                                                                          
+      public function all(): array                                                                                                                                                 
+      {                                                                                                                                                                            
+          return DemoUser::query()->get()->toArray();                                                                                                                              
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 按 ID 查询                                                                                                                                                                
+       */                                                                                                                                                                          
+      public function findById(int $id): ?array                                                                                                                                    
+      {                                                                                                                                                                            
+          $user = DemoUser::query()->find($id);                                                                                                                                    
+                                                                                                                                                                                   
+          return $user?->toArray();                                                                                                                                                
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 查询正常状态用户                                                                                                                                                          
+       */                                                                                                                                                                          
+      public function activeUsers(): array                                                                                                                                         
+      {                                                                                                                                                                            
+          return DemoUser::query()                                                                                                                                                 
+              ->where('status', 1)                                                                                                                                                 
+              ->get()                                                                                                                                                              
+              ->toArray();                                                                                                                                                         
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 查询年龄大于指定值的用户                                                                                                                                                  
+       */                                                                                                                                                                          
+      public function olderThan(int $age): array                                                                                                                                   
+      {                                                                                                                                                                            
+          return DemoUser::query()                                                                                                                                                 
+              ->where('age', '>', $age)                                                                                                                                            
+              ->orderBy('age', 'desc')                                                                                                                                             
+              ->get()                                                                                                                                                              
+              ->toArray();                                                                                                                                                         
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 新增用户                                                                                                                                                                  
+       */                                                                                                                                                                          
+      public function createUser(string $username, string $email, int $age, int $status = 1): array                                                                                
+      {                                                                                                                                                                            
+          $user = DemoUser::query()->create([                                                                                                                                      
+              'username' => $username,                                                                                                                                             
+              'email' => $email,                                                                                                                                                   
+              'age' => $age,                                                                                                                                                       
+              'status' => $status,                                                                                                                                                 
+              'created_at' => date('Y-m-d H:i:s'),                                                                                                                                 
+              'updated_at' => date('Y-m-d H:i:s'),                                                                                                                                 
+          ]);                                                                                                                                                                      
+                                                                                                                                                                                   
+          return $user->toArray();                                                                                                                                                 
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 更新用户状态                                                                                                                                                              
+       */                                                                                                                                                                          
+      public function updateStatus(int $id, int $status): bool                                                                                                                     
+      {                                                                                                                                                                            
+          return (bool) DemoUser::query()                                                                                                                                          
+              ->where('id', $id)                                                                                                                                                   
+              ->update([                                                                                                                                                           
+                  'status' => $status,                                                                                                                                             
+                  'updated_at' => date('Y-m-d H:i:s'),                                                                                                                             
+              ]);                                                                                                                                                                  
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 删除用户                                                                                                                                                                  
+       */                                                                                                                                                                          
+      public function deleteUser(int $id): bool                                                                                                                                    
+      {                                                                                                                                                                            
+          return (bool) DemoUser::query()                                                                                                                                          
+              ->where('id', $id)                                                                                                                                                   
+              ->delete();                                                                                                                                                          
+      }                                                                                                                                                                            
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 五、Query Builder Demo                                                                                                                                                         
+                                                                                                                                                                                   
+  文件：app/Service/DemoUserQueryService.php                                                                                                                                       
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  namespace App\Service;                                                                                                                                                           
+                                                                                                                                                                                   
+  use Hyperf\DbConnection\Db;                                                                                                                                                      
+                                                                                                                                                                                   
+  class DemoUserQueryService                                                                                                                                                       
+  {                                                                                                                                                                                
+      /**                                                                                                                                                                          
+       * 查询全部用户                                                                                                                                                              
+       */                                                                                                                                                                          
+      public function all(): array                                                                                                                                                 
+      {                                                                                                                                                                            
+          return Db::table('demo_users')->get()->toArray();                                                                                                                        
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 按 ID 查询                                                                                                                                                                
+       */                                                                                                                                                                          
+      public function findById(int $id): ?object                                                                                                                                   
+      {                                                                                                                                                                            
+          return Db::table('demo_users')                                                                                                                                           
+              ->where('id', $id)                                                                                                                                                   
+              ->first();                                                                                                                                                           
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 查询正常状态用户                                                                                                                                                          
+       */                                                                                                                                                                          
+      public function activeUsers(): array                                                                                                                                         
+      {                                                                                                                                                                            
+          return Db::table('demo_users')                                                                                                                                           
+              ->where('status', 1)                                                                                                                                                 
+              ->get()                                                                                                                                                              
+              ->toArray();                                                                                                                                                         
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 查询年龄大于指定值的用户                                                                                                                                                  
+       */                                                                                                                                                                          
+      public function olderThan(int $age): array                                                                                                                                   
+      {                                                                                                                                                                            
+          return Db::table('demo_users')                                                                                                                                           
+              ->where('age', '>', $age)                                                                                                                                            
+              ->orderBy('age', 'desc')                                                                                                                                             
+              ->get()                                                                                                                                                              
+              ->toArray();                                                                                                                                                         
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 新增用户                                                                                                                                                                  
+       */                                                                                                                                                                          
+      public function createUser(string $username, string $email, int $age, int $status = 1): int                                                                                  
+      {                                                                                                                                                                            
+          return (int) Db::table('demo_users')->insertGetId([                                                                                                                      
+              'username' => $username,                                                                                                                                             
+              'email' => $email,                                                                                                                                                   
+              'age' => $age,                                                                                                                                                       
+              'status' => $status,                                                                                                                                                 
+              'created_at' => date('Y-m-d H:i:s'),                                                                                                                                 
+              'updated_at' => date('Y-m-d H:i:s'),                                                                                                                                 
+          ]);                                                                                                                                                                      
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 更新状态                                                                                                                                                                  
+       */                                                                                                                                                                          
+      public function updateStatus(int $id, int $status): int                                                                                                                      
+      {                                                                                                                                                                            
+          return Db::table('demo_users')                                                                                                                                           
+              ->where('id', $id)                                                                                                                                                   
+              ->update([                                                                                                                                                           
+                  'status' => $status,                                                                                                                                             
+                  'updated_at' => date('Y-m-d H:i:s'),                                                                                                                             
+              ]);                                                                                                                                                                  
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 删除用户                                                                                                                                                                  
+       */                                                                                                                                                                          
+      public function deleteUser(int $id): int                                                                                                                                     
+      {                                                                                                                                                                            
+          return Db::table('demo_users')                                                                                                                                           
+              ->where('id', $id)                                                                                                                                                   
+              ->delete();                                                                                                                                                          
+      }                                                                                                                                                                            
+  }
+
+# 六、Controller Demo                                                                                                                                                            
+                                                                                                                                                                                   
+  文件：app/Controller/DemoUserController.php                                                                                                                                      
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  namespace App\Controller;                                                                                                                                                        
+                                                                                                                                                                                   
+  use App\Service\DemoUserOrmService;                                                                                                                                              
+  use App\Service\DemoUserQueryService;                                                                                                                                            
+  use Hyperf\HttpServer\Annotation\Controller;                                                                                                                                     
+  use Hyperf\HttpServer\Annotation\GetMapping;                                                                                                                                     
+                                                                                                                                                                                   
+  #[Controller(prefix: 'demo-user')]                                                                                                                                               
+  class DemoUserController                                                                                                                                                         
+  {                                                                                                                                                                                
+      public function __construct(                                                                                                                                                 
+          protected DemoUserOrmService $ormService,                                                                                                                                
+          protected DemoUserQueryService $queryService                                                                                                                             
+      ) {                                                                                                                                                                          
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * ORM 查询全部                                                                                                                                                              
+       */                                                                                                                                                                          
+      #[GetMapping('orm/all')]                                                                                                                                                     
+      public function ormAll(): array                                                                                                                                              
+      {                                                                                                                                                                            
+          return [                                                                                                                                                                 
+              'type' => 'orm',                                                                                                                                                     
+              'data' => $this->ormService->all(),                                                                                                                                  
+          ];                                                                                                                                                                       
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * ORM 查询启用用户                                                                                                                                                          
+       */                                                                                                                                                                          
+      #[GetMapping('orm/active')]                                                                                                                                                  
+      public function ormActive(): array                                                                                                                                           
+      {                                                                                                                                                                            
+          return [                                                                                                                                                                 
+              'type' => 'orm',                                                                                                                                                     
+              'data' => $this->ormService->activeUsers(),                                                                                                                          
+          ];                                                                                                                                                                       
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * Query Builder 查询全部                                                                                                                                                    
+       */                                                                                                                                                                          
+      #[GetMapping('query/all')]                                                                                                                                                   
+      public function queryAll(): array                                                                                                                                            
+      {                                                                                                                                                                            
+          return [                                                                                                                                                                 
+              'type' => 'query_builder',                                                                                                                                           
+              'data' => $this->queryService->all(),                                                                                                                                
+          ];                                                                                                                                                                       
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * Query Builder 查询年龄大于 20 的用户                                                                                                                                      
+       */                                                                                                                                                                          
+      #[GetMapping('query/older')]                                                                                                                                                 
+      public function queryOlder(): array                                                                                                                                          
+      {                                                                                                                                                                            
+          return [                                                                                                                                                                 
+              'type' => 'query_builder',                                                                                                                                           
+              'data' => $this->queryService->olderThan(20),                                                                                                                        
+          ];                                                                                                                                                                       
+      }                                                                                                                                                                            
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+                                                                                                                                                                                   
+  ## ORM 查询正常用户                                                                                                                                                              
+                                                                                                                                                                                   
+  GET /demo-user/orm/active                                                                                                                                                        
+                                                                                                                                                                                   
+  ## Query Builder 查询全部                                                                                                                                                        
+                                                                                                                                                                                   
+  GET /demo-user/query/all                                                                                                                                                         
+                                                                                                                                                                                   
+  ## Query Builder 查询年龄大于 20 的用户                                                                                                                                          
+                                                                                                                                                                                   
+  GET /demo-user/query/older
+
+
+# 一、事务 transaction demo                                                                                                                                                      
+                                                                                                                                                                                   
+  ## 1）事务场景说明                                                                                                                                                               
+                                                                                                                                                                                   
+  事务适合：                                                                                                                                                                       
+                                                                                                                                                                                   
+  - 多条 SQL 要么都成功，要么都失败                                                                                                                                                
+  - 更新库存 + 创建订单                                                                                                                                                            
+  - 新增用户 + 记录日志                                                                                                                                                            
+  - 转账扣款 + 加款                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 2）Service 示例                                                                                                                                                               
+                                                                                                                                                                                   
+  文件：app/Service/DemoTransactionService.php                                                                                                                                     
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  namespace App\Service;                                                                                                                                                           
+                                                                                                                                                                                   
+  use App\Model\DemoUser;                                                                                                                                                          
+  use Hyperf\DbConnection\Db;                                                                                                                                                      
+  use Throwable;                                                                                                                                                                   
+                                                                                                                                                                                   
+  class DemoTransactionService                                                                                                                                                     
+  {                                                                                                                                                                                
+      /**                                                                                                                                                                          
+       * 事务示例：创建两个用户                                                                                                                                                    
+       *                                                                                                                                                                           
+       * 说明：                                                                                                                                                                    
+       * - 两条插入语句放在一个事务里                                                                                                                                              
+       * - 如果中间抛异常，两条都不会成功                                                                                                                                          
+       */                                                                                                                                                                          
+      public function createTwoUsers(): array                                                                                                                                      
+      {                                                                                                                                                                            
+          try {                                                                                                                                                                    
+              $result = Db::transaction(function () {                                                                                                                              
+                  $user1 = DemoUser::query()->create([                                                                                                                             
+                      'username' => 'transaction_user_1',                                                                                                                          
+                      'email' => 'transaction1@example.com',                                                                                                                       
+                      'age' => 20,                                                                                                                                                 
+                      'status' => 1,                                                                                                                                               
+                      'created_at' => date('Y-m-d H:i:s'),                                                                                                                         
+                      'updated_at' => date('Y-m-d H:i:s'),                                                                                                                         
+                  ]);                                                                                                                                                              
+                                                                                                                                                                                   
+                  $user2 = DemoUser::query()->create([                                                                                                                             
+                      'username' => 'transaction_user_2',                                                                                                                          
+                      'email' => 'transaction2@example.com',                                                                                                                       
+                      'age' => 21,                                                                                                                                                 
+                      'status' => 1,                                                                                                                                               
+                      'created_at' => date('Y-m-d H:i:s'),                                                                                                                         
+                      'updated_at' => date('Y-m-d H:i:s'),                                                                                                                         
+                  ]);                                                                                                                                                              
+                                                                                                                                                                                   
+                  return [                                                                                                                                                         
+                      'user1' => $user1->toArray(),                                                                                                                                
+                      'user2' => $user2->toArray(),                                                                                                                                
+                  ];                                                                                                                                                               
+              });                                                                                                                                                                  
+                                                                                                                                                                                   
+              return [                                                                                                                                                             
+                  'code' => 0,                                                                                                                                                     
+                  'message' => '事务执行成功',                                                                                                                                     
+                  'data' => $result,                                                                                                                                               
+              ];                                                                                                                                                                   
+          } catch (Throwable $e) {                                                                                                                                                 
+              return [                                                                                                                                                             
+                  'code' => 500,                                                                                                                                                   
+                  'message' => '事务执行失败：' . $e->getMessage(),                                                                                                                
+                  'data' => null,                                                                                                                                                  
+              ];                                                                                                                                                                   
+          }                                                                                                                                                                        
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 事务回滚示例                                                                                                                                                              
+       *                                                                                                                                                                           
+       * 说明：                                                                                                                                                                    
+       * - 第一条插入成功后，主动抛异常                                                                                                                                            
+       * - 整个事务会回滚                                                                                                                                                          
+       * - 最终数据库中不会留下任何新数据                                                                                                                                          
+       */                                                                                                                                                                          
+      public function rollbackDemo(): array                                                                                                                                        
+      {                                                                                                                                                                            
+          try {                                                                                                                                                                    
+              Db::transaction(function () {                                                                                                                                        
+                  DemoUser::query()->create([                                                                                                                                      
+                      'username' => 'rollback_user_1',                                                                                                                             
+                      'email' => 'rollback1@example.com',                                                                                                                          
+                      'age' => 25,                                                                                                                                                 
+                      'status' => 1,                                                                                                                                               
+                      'created_at' => date('Y-m-d H:i:s'),                                                                                                                         
+                      'updated_at' => date('Y-m-d H:i:s'),                                                                                                                         
+                  ]);                                                                                                                                                              
+                                                                                                                                                                                   
+                  // 模拟异常                                                                                                                                                      
+                  throw new \RuntimeException('手动触发异常，测试事务回滚');                                                                                                       
+              });                                                                                                                                                                  
+                                                                                                                                                                                   
+              return [                                                                                                                                                             
+                  'code' => 0,                                                                                                                                                     
+                  'message' => '事务执行成功',                                                                                                                                     
+                  'data' => null,                                                                                                                                                  
+              ];                                                                                                                                                                   
+          } catch (Throwable $e) {                                                                                                                                                 
+              return [                                                                                                                                                             
+                  'code' => 500,                                                                                                                                                   
+                  'message' => '事务已回滚：' . $e->getMessage(),                                                                                                                  
+                  'data' => null,                                                                                                                                                  
+              ];                                                                                                                                                                   
+          }                                                                                                                                                                        
+      }                                                                                                                                                                            
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 3）Controller 示例                                                                                                                                                            
+                                                                                                                                                                                   
+  文件：app/Controller/DemoTransactionController.php                                                                                                                               
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  namespace App\Controller;                                                                                                                                                        
+                                                                                                                                                                                   
+  use App\Service\DemoTransactionService;                                                                                                                                          
+  use Hyperf\HttpServer\Annotation\Controller;                                                                                                                                     
+  use Hyperf\HttpServer\Annotation\GetMapping;                                                                                                                                     
+                                                                                                                                                                                   
+  #[Controller(prefix: 'demo-transaction')]                                                                                                                                        
+  class DemoTransactionController                                                                                                                                                  
+  {                                                                                                                                                                                
+      public function __construct(                                                                                                                                                 
+          protected DemoTransactionService $transactionService                                                                                                                     
+      ) {                                                                                                                                                                          
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 事务成功示例                                                                                                                                                              
+       */                                                                                                                                                                          
+      #[GetMapping('success')]                                                                                                                                                     
+      public function success(): array                                                                                                                                             
+      {                                                                                                                                                                            
+          return $this->transactionService->createTwoUsers();                                                                                                                      
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 事务回滚示例                                                                                                                                                              
+       */                                                                                                                                                                          
+      #[GetMapping('rollback')]                                                                                                                                                    
+      public function rollback(): array                                                                                                                                            
+      {                                                                                                                                                                            
+          return $this->transactionService->rollbackDemo();                                                                                                                        
+      }                                                                                                                                                                            
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 4）访问示例                                                                                                                                                                   
+                                                                                                                                                                                   
+  ### 成功事务                                                                                                                                                                     
+                                                                                                                                                                                   
+  GET /demo-transaction/success                                                                                                                                                    
+                                                                                                                                                                                   
+  ### 回滚事务                                                                                                                                                                     
+                                                                                                                                                                                   
+  GET /demo-transaction/rollback                                                                                                                                                   
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 二、join / groupBy / count 统计查询 demo                                                                                                                                       
+                                                                                                                                                                                   
+  为了演示 join 和 groupBy，建议再补一张表：demo_orders                                                                                                                            
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 1）建表 SQL                                                                                                                                                                   
+                                                                                                                                                                                   
+  DROP TABLE IF EXISTS `demo_orders`;                                                                                                                                              
+                                                                                                                                                                                   
+  CREATE TABLE `demo_orders` (                                                                                                                                                     
+    `id` bigint UNSIGNED NOT NULL AUTO_INCREMENT,                                                                                                                                  
+    `user_id` bigint UNSIGNED NOT NULL COMMENT '用户ID',                                                                                                                           
+    `order_no` varchar(50) NOT NULL COMMENT '订单号',                                                                                                                              
+    `amount` decimal(10,2) NOT NULL DEFAULT 0.00 COMMENT '订单金额',                                                                                                               
+    `status` tinyint NOT NULL DEFAULT 1 COMMENT '订单状态',                                                                                                                        
+    `created_at` datetime DEFAULT NULL,                                                                                                                                            
+    `updated_at` datetime DEFAULT NULL,                                                                                                                                            
+    PRIMARY KEY (`id`)                                                                                                                                                             
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;                                                                                                                                         
+                                                                                                                                                                                   
+  插入测试数据：                                                                                                                                                                   
+                                                                                                                                                                                   
+  INSERT INTO `demo_orders` (`user_id`, `order_no`, `amount`, `status`, `created_at`, `updated_at`) VALUES                                                                         
+  (1, 'ORD001', 99.00, 1, NOW(), NOW()),                                                                                                                                           
+  (1, 'ORD002', 199.00, 1, NOW(), NOW()),                                                                                                                                          
+  (2, 'ORD003', 88.00, 1, NOW(), NOW()),                                                                                                                                           
+  (2, 'ORD004', 66.00, 0, NOW(), NOW()),                                                                                                                                           
+  (3, 'ORD005', 300.00, 1, NOW(), NOW());                                                                                                                                          
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 2）Query Builder 统计 Service                                                                                                                                                 
+                                                                                                                                                                                   
+  文件：app/Service/DemoStatisticsService.php                                                                                                                                      
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  namespace App\Service;                                                                                                                                                           
+                                                                                                                                                                                   
+  use Hyperf\DbConnection\Db;                                                                                                                                                      
+                                                                                                                                                                                   
+  class DemoStatisticsService                                                                                                                                                      
+  {                                                                                                                                                                                
+      /**                                                                                                                                                                          
+       * join 查询：查询用户及其订单信息                                                                                                                                           
+       */                                                                                                                                                                          
+      public function joinUsersAndOrders(): array                                                                                                                                  
+      {                                                                                                                                                                            
+          return Db::table('demo_users as u')                                                                                                                                      
+              ->join('demo_orders as o', 'u.id', '=', 'o.user_id')                                                                                                                 
+              ->select([                                                                                                                                                           
+                  'u.id',                                                                                                                                                          
+                  'u.username',                                                                                                                                                    
+                  'u.email',                                                                                                                                                       
+                  'o.order_no',                                                                                                                                                    
+                  'o.amount',                                                                                                                                                      
+                  'o.status',                                                                                                                                                      
+              ])                                                                                                                                                                   
+              ->get()                                                                                                                                                              
+              ->toArray();                                                                                                                                                         
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * count 统计：统计订单总数                                                                                                                                                  
+       */                                                                                                                                                                          
+      public function countOrders(): int                                                                                                                                           
+      {                                                                                                                                                                            
+          return Db::table('demo_orders')->count();                                                                                                                                
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * groupBy 统计：按用户统计订单数量                                                                                                                                          
+       */                                                                                                                                                                          
+      public function countOrdersGroupByUser(): array                                                                                                                              
+      {                                                                                                                                                                            
+          return Db::table('demo_orders')                                                                                                                                          
+              ->select([                                                                                                                                                           
+                  'user_id',                                                                                                                                                       
+                  Db::raw('COUNT(*) as order_count'),                                                                                                                              
+              ])                                                                                                                                                                   
+              ->groupBy('user_id')                                                                                                                                                 
+              ->get()                                                                                                                                                              
+              ->toArray();                                                                                                                                                         
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * groupBy + sum：按用户统计订单总金额                                                                                                                                       
+       */                                                                                                                                                                          
+      public function sumAmountGroupByUser(): array                                                                                                                                
+      {                                                                                                                                                                            
+          return Db::table('demo_orders')                                                                                                                                          
+              ->select([                                                                                                                                                           
+                  'user_id',                                                                                                                                                       
+                  Db::raw('SUM(amount) as total_amount'),                                                                                                                          
+              ])                                                                                                                                                                   
+              ->groupBy('user_id')                                                                                                                                                 
+              ->get()                                                                                                                                                              
+              ->toArray();                                                                                                                                                         
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * join + groupBy：统计每个用户的订单数量                                                                                                                                    
+       */                                                                                                                                                                          
+      public function userOrderStatistics(): array                                                                                                                                 
+      {                                                                                                                                                                            
+          return Db::table('demo_users as u')                                                                                                                                      
+              ->leftJoin('demo_orders as o', 'u.id', '=', 'o.user_id')                                                                                                             
+              ->select([                                                                                                                                                           
+                  'u.id',                                                                                                                                                          
+                  'u.username',                                                                                                                                                    
+                  Db::raw('COUNT(o.id) as order_count'),                                                                                                                           
+                  Db::raw('IFNULL(SUM(o.amount), 0) as total_amount'),                                                                                                             
+              ])                                                                                                                                                                   
+              ->groupBy('u.id', 'u.username')                                                                                                                                      
+              ->orderBy('u.id')                                                                                                                                                    
+              ->get()                                                                                                                                                              
+              ->toArray();                                                                                                                                                         
+      }                                                                                                                                                                            
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 3）Controller 示例                                                                                                                                                            
+                                                                                                                                                                                   
+  文件：app/Controller/DemoStatisticsController.php                                                                                                                                
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  namespace App\Controller;                                                                                                                                                        
+                                                                                                                                                                                   
+  use App\Service\DemoStatisticsService;                                                                                                                                           
+  use Hyperf\HttpServer\Annotation\Controller;                                                                                                                                     
+  use Hyperf\HttpServer\Annotation\GetMapping;                                                                                                                                     
+                                                                                                                                                                                   
+  #[Controller(prefix: 'demo-stat')]                                                                                                                                               
+  class DemoStatisticsController                                                                                                                                                   
+  {                                                                                                                                                                                
+      public function __construct(                                                                                                                                                 
+          protected DemoStatisticsService $statisticsService                                                                                                                       
+      ) {                                                                                                                                                                          
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * join 查询                                                                                                                                                                 
+       */                                                                                                                                                                          
+      #[GetMapping('join')]                                                                                                                                                        
+      public function join(): array                                                                                                                                                
+      {                                                                                                                                                                            
+          return [                                                                                                                                                                 
+              'type' => 'join',                                                                                                                                                    
+              'data' => $this->statisticsService->joinUsersAndOrders(),                                                                                                            
+          ];                                                                                                                                                                       
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * count 统计                                                                                                                                                                
+       */                                                                                                                                                                          
+      #[GetMapping('count')]                                                                                                                                                       
+      public function count(): array                                                                                                                                               
+      {                                                                                                                                                                            
+          return [                                                                                                                                                                 
+              'type' => 'count',                                                                                                                                                   
+              'data' => [                                                                                                                                                          
+                  'order_total' => $this->statisticsService->countOrders(),                                                                                                        
+              ],                                                                                                                                                                   
+          ];                                                                                                                                                                       
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * groupBy 统计订单数量                                                                                                                                                      
+       */                                                                                                                                                                          
+      #[GetMapping('group-count')]                                                                                                                                                 
+      public function groupCount(): array                                                                                                                                          
+      {                                                                                                                                                                            
+          return [                                                                                                                                                                 
+              'type' => 'groupBy count',                                                                                                                                           
+              'data' => $this->statisticsService->countOrdersGroupByUser(),                                                                                                        
+          ];                                                                                                                                                                       
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * groupBy 统计总金额                                                                                                                                                        
+       */                                                                                                                                                                          
+      #[GetMapping('group-sum')]                                                                                                                                                   
+      public function groupSum(): array                                                                                                                                            
+      {                                                                                                                                                                            
+          return [                                                                                                                                                                 
+              'type' => 'groupBy sum',                                                                                                                                             
+              'data' => $this->statisticsService->sumAmountGroupByUser(),                                                                                                          
+          ];                                                                                                                                                                       
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * join + groupBy 综合统计                                                                                                                                                   
+       */                                                                                                                                                                          
+      #[GetMapping('user-order-stat')]                                                                                                                                             
+      public function userOrderStat(): array                                                                                                                                       
+      {                                                                                                                                                                            
+          return [                                                                                                                                                                 
+              'type' => 'join + groupBy',                                                                                                                                          
+              'data' => $this->statisticsService->userOrderStatistics(),                                                                                                           
+          ];                                                                                                                                                                       
+      }                                                                                                                                                                            
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 三、访问示例                                                                                                                                                                   
+                                                                                                                                                                                   
+  ## 事务成功                                                                                                                                                                      
+                                                                                                                                                                                   
+  GET /demo-transaction/success                                                                                                                                                    
+                                                                                                                                                                                   
+  ## 事务回滚                                                                                                                                                                      
+                                                                                                                                                                                   
+  GET /demo-transaction/rollback                                                                                                                                                   
+                                                                                                                                                                                   
+  GET /demo-stat/join                                                                                                                                                              
+                                                                                                                                                                                   
+  ## count 统计                                                                                                                                                                    
+                                                                                                                                                                                   
+  GET /demo-stat/count                                                                                                                                                             
+  ## groupBy 统计金额                                                                                                                                                              
+                                                                                                                                                                                   
+  GET /demo-stat/group-sum                                                                                                                                                         
+                                                                                                                                                                                   
+  ## 用户订单综合统计                                                                                                                                                              
+                                                                                                                                                                                   
+  GET /demo-stat/user-order-stat                                                                                                                                                   
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 四、总结                                                                                                                                                                       
+                                                                                                                                                                                   
+  你现在这套 demo 已经覆盖了很核心的数据库能力：                                                                                                                                   
+                                                                                                                                                                                   
+  ## 事务                                                                                                                                                                          
+                                                                                                                                                                                   
+  - Db::transaction()                                                                                                                                                              
+  - 成功提交                                                                                                                                                                       
+  - 异常回滚                                                                                                                                                                       
+                                                                                                                                                                                   
+  ## 统计查询                                                                                                                                                                      
+                                                                                                                                                                                   
+  - join                                                                                                                                                                           
+  - count                                                                                                                                                                          
+  - groupBy                                                                                                                                                                        
+  - sum                                                                                                                                                                            
+  - leftJoin + groupBy
