@@ -4095,3 +4095,341 @@ return [
         YourMiddlewareB::class => 3,
     ],
 ];
+
+> 先会写 1 个切面 -> 会切类/方法 -> 会切注解 -> 知道代理缓存在哪 -> 拿日志/权限/埋点 3 个真实场景反复练               
+                                                                                                                        
+  官方资料：                                                                                                            
+                                                                                                                        
+  - Hyperf AOP 文档：https://geekdaxue.co/read/hyperf-3.0-doc/docs-zh-cn-aop.md                                         
+  - Hyperf 文档入口：https://hyperf.wiki/                                                                               
+                                                                                                                        
+  ———                                                                                                                   
+                                                                                                                        
+  # 一、先记住 3 个核心点                                                                                               
+                                                                                                                        
+  官方文档里，Hyperf AOP 主要是：                                                                                       
+                                                                                                                        
+  - Aspect：切面类                                                                                                      
+  - ProceedingJoinPoint：连接点                                                                                         
+  - process()：环绕执行原方法                                                                                           
+                                                                                                                        
+  你真正天天会写的，基本就是这三个。                                                                                    
+                                                                                                                        
+  ———                                                                                                                   
+                                                                                                                        
+  # 二、最小可运行 demo                                                                                                 
+                                                                                                                        
+  ## 1）业务类                                                                                                          
+                                                                                                                        
+  app/Service/UserService.php                                                                                           
+                                                                                                                        
+  <?php                                                                                                                 
+                                                                                                                        
+  declare(strict_types=1);                                                                                              
+                                                                                                                        
+  namespace App\Service;                                                                                                
+                                                                                                                        
+  class UserService                                                                                                     
+  {                                                                                                                     
+      public function getUserInfo(int $id): array                                                                       
+      {                                                                                                                 
+          return [                                                                                                      
+              'id' => $id,                                                                                              
+              'name' => '张三',                                                                                         
+          ];                                                                                                            
+      }                                                                                                                 
+  }                                                                                                                     
+                                                                                                                        
+  ———                                                                                                                   
+                                                                                                                        
+  ## 2）切面类                                                                                                          
+                                                                                                                        
+  app/Aspect/UserServiceAspect.php                                                                                      
+                                                                                                                        
+  <?php                                                                                                                 
+                                                                                                                        
+  declare(strict_types=1);                                                                                              
+                                                                                                                        
+  namespace App\Aspect;                                                                                                 
+                                                                                                                        
+  use App\Service\UserService;                                                                                          
+  use Hyperf\Di\Annotation\Aspect;                                                                                      
+  use Hyperf\Di\Aop\AbstractAspect;                                                                                     
+  use Hyperf\Di\Aop\ProceedingJoinPoint;                                                                                
+                                                                                                                        
+  #[Aspect]                                                                                                             
+  class UserServiceAspect extends AbstractAspect                                                                        
+  {                                                                                                                     
+      public array $classes = [                                                                                         
+          UserService::class . '::getUserInfo',                                                                         
+      ];                                                                                                                
+                                                                                                                        
+      public function process(ProceedingJoinPoint $proceedingJoinPoint)                                                 
+      {                                                                                                                 
+          // 方法参数                                                                                                   
+          $arguments = $proceedingJoinPoint->getArguments();                                                            
+                                                                                                                        
+          var_dump('AOP before', $arguments);                                                                           
+                                                                                                                        
+          // 执行原方法                                                                                                 
+          $result = $proceedingJoinPoint->process();                                                                    
+                                                                                                                        
+          var_dump('AOP after', $result);                                                                               
+                                                                                                                        
+          return $result;                                                                                               
+      }                                                                                                                 
+  }                                                                                                                     
+                                                                                                                        
+  ———                                                                                                                   
+                                                                                                                        
+  ## 3）控制器调用                                                                                                      
+                                                                                                                        
+  app/Controller/UserController.php                                                                                     
+                                                                                                                        
+  <?php                                                                                                                 
+                                                                                                                        
+  declare(strict_types=1);                                                                                              
+                                                                                                                        
+  namespace App\Controller;                                                                                             
+                                                                                                                        
+  use App\Service\UserService;                                                                                          
+  use Hyperf\HttpServer\Annotation\Controller;                                                                          
+  use Hyperf\HttpServer\Annotation\GetMapping;                                                                          
+                                                                                                                        
+  #[Controller(prefix: 'user')]                                                                                         
+  class UserController                                                                                                  
+  {                                                                                                                     
+      public function __construct(                                                                                      
+          protected UserService $userService                                                                            
+      ) {                                                                                                               
+      }                                                                                                                 
+                                                                                                                        
+      #[GetMapping('info')]                                                                                             
+      public function info(): array                                                                                     
+      {                                                                                                                 
+          return $this->userService->getUserInfo(1);                                                                    
+      }                                                                                                                 
+  }                                                                                                                     
+                                                                                                                        
+  访问：                                                                                                                
+                                                                                                                        
+  GET /user/info                                                                                                        
+                                                                                                                        
+  你就能看到切面在原方法前后生效。                                                                                      
+                                                                                                                        
+  ———                                                                                                                   
+                                                                                                                        
+  # 三、AOP 最该怎么练                                                                                                  
+                                                                                                                        
+  ## 第一阶段：只练“切方法”                                                                                             
+                                                                                                                        
+  先只会这个：                                                                                                          
+                                                                                                                        
+  public array $classes = [                                                                                             
+      UserService::class . '::getUserInfo',                                                                             
+  ];                                                                                                                    
+                                                                                                                        
+  练 3 次：                                                                                                             
+                                                                                                                        
+  - 打日志                                                                                                              
+  - 统计耗时                                                                                                            
+  - 改返回值                                                                                                            
+                                                                                                                        
+  比如耗时：                                                                                                            
+                                                                                                                        
+  $start = microtime(true);                                                                                             
+  $result = $proceedingJoinPoint->process();                                                                            
+  $cost = microtime(true) - $start;                                                                                     
+                                                                                                                        
+  ———                                                                                                                   
+                                                                                                                        
+  ## 第二阶段：练“切整个类”                                                                                             
+                                                                                                                        
+  比如：                                                                                                                
+                                                                                                                        
+  public array $classes = [                                                                                             
+      UserService::class,                                                                                               
+  ];                                                                                                                    
+                                                                                                                        
+  表示这个类里的方法都能被切。                                                                                          
+                                                                                                                        
+  然后你观察：                                                                                                          
+                                                                                                                        
+  - 哪些方法会进切面                                                                                                    
+  - 公共逻辑如何抽离                                                                                                    
+                                                                                                                        
+  ———                                                                                                                   
+                                                                                                                        
+  ## 第三阶段：练“切注解”                                                                                               
+                                                                                                                        
+  官方文档支持按注解切。                                                                                                
+  你自己定义一个注解，比如 Loggable，然后凡是标记这个注解的方法都统一记录日志。                                         
+                                                                                                                        
+  这是最接近企业项目的写法。                                                                                            
+                                                                                                                        
+  ———                                                                                                                   
+                                                                                                                        
+  # 四、最常见真实场景                                                                                                  
+                                                                                                                        
+  你熟悉 AOP，最好就练这 4 个：                                                                                         
+                                                                                                                        
+  ## 1）方法耗时统计                                                                                                    
+                                                                                                                        
+  最适合入门。                                                                                                          
+                                                                                                                        
+  ## 2）统一操作日志                                                                                                    
+                                                                                                                        
+  比如记录谁调用了哪个 service。                                                                                        
+                                                                                                                        
+  ## 3）权限校验 / 幂等校验                                                                                             
+                                                                                                                        
+  在方法执行前判断。                                                                                                    
+                                                                                                                        
+  ## 4）缓存切面                                                                                                        
+                                                                                                                        
+  执行前查缓存，执行后写缓存。                                                                                          
+                                                                                                                        
+  ———                                                                                                                   
+                                                                                                                        
+  # 五、怎么才算“熟悉使用”                                                                                              
+                                                                                                                        
+  你做到下面 5 条，就算基本熟了：                                                                                       
+                                                                                                                        
+  ## 1                                                                                                                  
+                                                                                                                        
+  能独立写一个 Aspect                                                                                                   
+                                                                                                                        
+  ## 2                                                                                                                  
+                                                                                                                        
+  知道怎么切：                                                                                                          
+                                                                                                                        
+  - 类                                                                                                                  
+  - 指定方法                                                                                                            
+  - 模糊方法                                                                                                            
+  - 注解                                                                                                                
+                                                                                                                        
+  官方文档提到可这样配：                                                                                                
+                                                                                                                        
+  public $classes = [                                                                                                   
+      SomeClass::class,                                                                                                 
+      'App\Service\SomeClass::someMethod',                                                                              
+      'App\Service\SomeClass::*Method',                                                                                 
+  ];                                                                                                                    
+                                                                                                                        
+  来源：Hyperf AOP 文档                                                                                                 
+  https://geekdaxue.co/read/hyperf-3.0-doc/docs-zh-cn-aop.md                                                            
+                                                                                                                        
+  ## 3                                                                                                                  
+                                                                                                                        
+  知道 process() 里：                                                                                                   
+                                                                                                                        
+  - 前置处理                                                                                                            
+  - 调原方法                                                                                                            
+  - 后置处理                                                                                                            
+                                                                                                                        
+  ## 4                                                                                                                  
+                                                                                                                        
+  知道代理类缓存会生成到：                                                                                              
+                                                                                                                        
+  runtime/container/proxy/                                                                                              
+                                                                                                                        
+  这个也是官方文档明确提到的。                                                                                          
+  来源同上。                                                                                                            
+                                                                                                                        
+  ## 5                                                                                                                  
+                                                                                                                        
+  知道 AOP 不适合乱用                                                                                                   
+  不要什么都切，优先切：                                                                                                
+                                                                                                                        
+  - 通用逻辑                                                                                                            
+  - 横切逻辑                                                                                                            
+  - 跟业务主流程解耦的逻辑                                                                                              
+                                                                                                                        
+  ———                                                                                                                   
+                                                                                                                        
+  # 六、推荐学习顺序                                                                                                    
+                                                                                                                        
+  按这个顺序最省时间：                                                                                                  
+                                                                                                                        
+  ## 第 1 步                                                                                                            
+                                                                                                                        
+  先写一个“打印 before/after”的切面                                                                                     
+                                                                                                                        
+  ## 第 2 步                                                                                                            
+                                                                                                                        
+  改成“统计方法耗时”                                                                                                    
+                                                                                                                        
+  ## 第 3 步                                                                                                            
+                                                                                                                        
+  改成“捕获异常并记录日志”                                                                                              
+                                                                                                                        
+  ## 第 4 步                                                                                                            
+                                                                                                                        
+  练一个“自定义注解 + 切面”                                                                                             
+                                                                                                                        
+  ## 第 5 步                                                                                                            
+                                                                                                                        
+  拿真实业务做：                                                                                                        
+                                                                                                                        
+  - 登录日志                                                                                                            
+  - 操作审计                                                                                                            
+  - 幂等校验                                                                                                            
+                                                                                                                        
+  ———                                                                                                                   
+                                                                                                                        
+  # 七、一个更实用的耗时切面 demo                                                                                       
+                                                                                                                        
+  <?php                                                                                                                 
+                                                                                                                        
+  declare(strict_types=1);                                                                                              
+                                                                                                                        
+  namespace App\Aspect;                                                                                                 
+                                                                                                                        
+  use App\Service\UserService;                                                                                          
+  use Hyperf\Di\Annotation\Aspect;                                                                                      
+  use Hyperf\Di\Aop\AbstractAspect;                                                                                     
+  use Hyperf\Di\Aop\ProceedingJoinPoint;                                                                                
+                                                                                                                        
+  #[Aspect]                                                                                                             
+  class CostTimeAspect extends AbstractAspect                                                                           
+  {                                                                                                                     
+      public array $classes = [                                                                                         
+          UserService::class,                                                                                           
+      ];                                                                                                                
+                                                                                                                        
+      public function process(ProceedingJoinPoint $proceedingJoinPoint)                                                 
+      {                                                                                                                 
+          $start = microtime(true);                                                                                     
+                                                                                                                        
+          $result = $proceedingJoinPoint->process();                                                                    
+                                                                                                                        
+          $cost = round((microtime(true) - $start) * 1000, 2);                                                          
+                                                                                                                        
+          var_dump('method: ' . $proceedingJoinPoint->className . '::' . $proceedingJoinPoint->methodName);             
+          var_dump('cost: ' . $cost . 'ms');                                                                            
+                                                                                                                        
+          return $result;                                                                                               
+      }                                                                                                                 
+  }                                                                                                                     
+                                                                                                                        
+  ———                                                                                                                   
+                                                                                                                        
+  如果你真想熟悉，连续做这 3 个练习：                                                                                   
+                                                                                                                        
+  1. 日志切面                                                                                                           
+  2. 耗时统计切面                                                                                                       
+  3. 自定义注解权限切面                                                                                                 
+                                                                                                                        
+  做完基本就会了。                                                                                                      
+                                                                                                                        
+  ———                                                                                                                   
+                                                                                                                        
+  # 九、一句话总结                                                                                                      
+                                                                                                                        
+  熟悉 AOP 的关键，不是背概念，而是反复写 3 类切面：日志、耗时、校验。                                                  
+                                                                                                                        
+  如果你要，我下一条可以继续直接给你：                                                                                  
+                                                                                                                        
+  1. Hyperf 自定义注解 + AOP 完整 demo                                                                                  
+  2. AOP 记录操作日志 demo                                                                                              
+  3. AOP 做接口幂等校验 demo
