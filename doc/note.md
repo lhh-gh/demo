@@ -4077,3 +4077,21 @@ composer require hyperf/paginator
   - SET NX EX                                                                                                                                                                      
   - 唯一 token                                                                                                                                                                     
   - Lua 原子释放锁
+
+
+
+# 中间件
+
+生成中间件
+php ./bin/hyperf.php gen:middleware Auth/FooMiddleware
+
+
+我们从上面可以了解到总共有 3 种级别的中间件，分别为 全局中间件、类级别中间件、方法级别中间件，如果都定义了这些中间件，执行顺序为：全局中间件 -> 类级别中间件 -> 方法级别中间件。
+在>=3.0.34的版本中，新增了优先级的配置，可以在配置方法、路由中间件的时候改变中间件的执行顺序，优先级越高，执行顺序越靠前。
+// 全局中间件配置文件 middleware.php
+return [
+    'http' => [
+        YourMiddleware::class,
+        YourMiddlewareB::class => 3,
+    ],
+];
