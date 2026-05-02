@@ -8169,3 +8169,291 @@ return [
   - groupBy                                                                                                                                                                        
   - sum                                                                                                                                                                            
   - leftJoin + groupBy
+
+
+
+## app/Controller/ArticleController.php                                                                                                                                          
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  namespace App\Controller;                                                                                                                                                        
+                                                                                                                                                                                   
+  use App\Service\DemoArticleService;                                                                                                                                              
+  use Hyperf\HttpServer\Annotation\Controller;                                                                                                                                     
+  use Hyperf\HttpServer\Annotation\DeleteMapping;                                                                                                                                  
+  use Hyperf\HttpServer\Annotation\GetMapping;                                                                                                                                     
+  use Hyperf\HttpServer\Annotation\PostMapping;                                                                                                                                    
+  use Hyperf\HttpServer\Annotation\PutMapping;                                                                                                                                     
+                                                                                                                                                                                   
+  #[Controller(prefix: 'articles')]                                                                                                                                                
+  class ArticleController                                                                                                                                                          
+  {                                                                                                                                                                                
+      public function __construct(                                                                                                                                                 
+          protected DemoArticleService $service                                                                                                                                    
+      ) {                                                                                                                                                                          
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 获取文章列表                                                                                                                                                              
+       * GET /articles                                                                                                                                                             
+       */                                                                                                                                                                          
+      #[GetMapping('')]                                                                                                                                                            
+      public function index(): array                                                                                                                                               
+      {                                                                                                                                                                            
+          return [                                                                                                                                                                 
+              'code' => 0,                                                                                                                                                         
+              'message' => 'success',                                                                                                                                              
+              'data' => $this->service->getList(),                                                                                                                                 
+          ];                                                                                                                                                                       
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 获取文章详情                                                                                                                                                              
+       * GET /articles/{id}                                                                                                                                                        
+       */                                                                                                                                                                          
+      #[GetMapping('{id:\d+}')]                                                                                                                                                    
+      public function show(int $id): array                                                                                                                                         
+      {                                                                                                                                                                            
+          return [                                                                                                                                                                 
+              'code' => 0,                                                                                                                                                         
+              'message' => 'success',                                                                                                                                              
+              'data' => $this->service->getDetail($id),                                                                                                                            
+          ];                                                                                                                                                                       
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 创建文章                                                                                                                                                                  
+       * POST /articles                                                                                                                                                            
+       */                                                                                                                                                                          
+      #[PostMapping('')]                                                                                                                                                           
+      public function store(): array                                                                                                                                               
+      {                                                                                                                                                                            
+          return [                                                                                                                                                                 
+              'code' => 0,                                                                                                                                                         
+              'message' => '新增成功',                                                                                                                                             
+              'data' => $this->service->create(                                                                                                                                    
+                  '新文章标题',                                                                                                                                                    
+                  '这里是文章内容',                                                                                                                                                
+                  '王五',                                                                                                                                                          
+                  1                                                                                                                                                                
+              ),                                                                                                                                                                   
+          ];                                                                                                                                                                       
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 更新文章                                                                                                                                                                  
+       * PUT /articles/{id}                                                                                                                                                        
+       */                                                                                                                                                                          
+      #[PutMapping('{id:\d+}')]                                                                                                                                                    
+      public function update(int $id): array                                                                                                                                       
+      {                                                                                                                                                                            
+          $result = $this->service->update(                                                                                                                                        
+              $id,                                                                                                                                                                 
+              '修改后的标题',                                                                                                                                                      
+              '修改后的内容',                                                                                                                                                      
+              '张三',                                                                                                                                                              
+              1                                                                                                                                                                    
+          );                                                                                                                                                                       
+                                                                                                                                                                                   
+          return [                                                                                                                                                                 
+              'code' => 0,                                                                                                                                                         
+              'message' => $result ? '更新成功' : '更新失败',                                                                                                                      
+              'data' => null,                                                                                                                                                      
+          ];                                                                                                                                                                       
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 删除文章                                                                                                                                                                  
+       * DELETE /articles/{id}                                                                                                                                                     
+       */                                                                                                                                                                          
+      #[DeleteMapping('{id:\d+}')]                                                                                                                                                 
+      public function destroy(int $id): array                                                                                                                                      
+      {                                                                                                                                                                            
+          $result = $this->service->delete($id);                                                                                                                                   
+                                                                                                                                                                                   
+          return [                                                                                                                                                                 
+              'code' => 0,                                                                                                                                                         
+              'message' => $result ? '删除成功' : '删除失败',                                                                                                                      
+              'data' => null,                                                                                                                                                      
+          ];                                                                                                                                                                       
+      }                                                                                                                                                                            
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 四、这个 Controller 为什么更 RESTful                                                                                                                                           
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 1）URL 只表示资源，不表示动作                                                                                                                                                 
+                                                                                                                                                                                   
+  ### 资源集合                                                                                                                                                                     
+                                                                                                                                                                                   
+  /articles                                                                                                                                                                        
+                                                                                                                                                                                   
+  表示“文章资源集合”                                                                                                                                                               
+                                                                                                                                                                                   
+  ### 单个资源                                                                                                                                                                     
+                                                                                                                                                                                   
+  /articles/1                                                                                                                                                                      
+                                                                                                                                                                                   
+  表示“ID=1 的文章”                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 2）动作交给 HTTP 方法表达                                                                                                                                                     
+                                                                                                                                                                                   
+  ### 查询列表                                                                                                                                                                     
+                                                                                                                                                                                   
+  GET /articles                                                                                                                                                                    
+                                                                                                                                                                                   
+  ### 查询详情                                                                                                                                                                     
+                                                                                                                                                                                   
+  GET /articles/1                                                                                                                                                                  
+                                                                                                                                                                                   
+  ### 新增                                                                                                                                                                         
+                                                                                                                                                                                   
+  POST /articles                                                                                                                                                                   
+                                                                                                                                                                                   
+  ### 更新                                                                                                                                                                         
+                                                                                                                                                                                   
+  PUT /articles/1                                                                                                                                                                  
+                                                                                                                                                                                   
+  ### 删除                                                                                                                                                                         
+                                                                                                                                                                                   
+  DELETE /articles/1                                                                                                                                                               
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 五、RESTful 常见方法命名习惯                                                                                                                                                   
+                                                                                                                                                                                   
+  Controller 里很常见这样命名：                                                                                                                                                    
+                                                                                                                                                                                   
+  | 方法名 | 语义 |                                                                                                                                                                
+  |---|---|                                                                                                                                                                        
+  | index() | 列表 |                                                                                                                                                               
+  | show() | 详情 |                                                                                                                                                                
+  | store() | 新增 |                                                                                                                                                               
+  | update() | 更新 |                                                                                                                                                              
+  | destroy() | 删除 |                                                                                                                                                             
+                                                                                                                                                                                   
+  所以你看到很多框架、很多项目里都会这么写。                                                                                                                                       
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 六、前后对比                                                                                                                                                                   
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 你原来动作式写法                                                                                                                                                              
+                                                                                                                                                                                   
+  | 功能 | 路径 |                                                                                                                                                                  
+  |---|---|                                                                                                                                                                        
+  | 列表 | /demo-article/list |                                                                                                                                                    
+  | 详情 | /demo-article/detail |                                                                                                                                                  
+  | 新增 | /demo-article/create |                                                                                                                                                  
+  | 更新 | /demo-article/update |                                                                                                                                                  
+  | 删除 | /demo-article/delete |                                                                                                                                                  
+                                                                                                                                                                                   
+  问题：                                                                                                                                                                           
+                                                                                                                                                                                   
+  - URL 里混入动作                                                                                                                                                                 
+  - 不够统一                                                                                                                                                                       
+  - 不够标准 REST 风格                                                                                                                                                             
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## RESTful 写法                                                                                                                                                                  
+                                                                                                                                                                                   
+  | 功能 | 方法 | 路径 |                                                                                                                                                           
+  |---|---|---|                                                                                                                                                                    
+  | 列表 | GET | /articles |                                                                                                                                                       
+  | 详情 | GET | /articles/{id} |                                                                                                                                                  
+  | 新增 | POST | /articles |                                                                                                                                                      
+  | 更新 | PUT | /articles/{id} |                                                                                                                                                  
+  | 删除 | DELETE | /articles/{id} |                                                                                                                                               
+                                                                                                                                                                                   
+  优点：                                                                                                                                                                           
+                                                                                                                                                                                   
+  - 标准                                                                                                                                                                           
+  - 清晰                                                                                                                                                                           
+  - 前后端容易约定                                                                                                                                                                 
+  - 更适合 API 文档和团队协作                                                                                                                                                      
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 七、如果要更符合企业项目                                                                                                                                                       
+                                                                                                                                                                                   
+  除了 RESTful 路径，通常还会再加：                                                                                                                                                
+                                                                                                                                                                                   
+  ## 1）分页参数                                                                                                                                                                   
+                                                                                                                                                                                   
+  GET /articles?page=1&page_size=10                                                                                                                                                
+                                                                                                                                                                                   
+  ## 2）筛选条件                                                                                                                                                                   
+                                                                                                                                                                                   
+  GET /articles?status=1&author=张三                                                                                                                                               
+                                                                                                                                                                                   
+  ## 3）统一响应格式                                                                                                                                                               
+                                                                                                                                                                                   
+  {                                                                                                                                                                                
+    "code": 0,                                                                                                                                                                     
+    "message": "success",                                                                                                                                                          
+    "data": ...                                                                                                                                                                    
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ## 4）正确的状态码                                                                                                                                                               
+                                                                                                                                                                                   
+  例如：                                                                                                                                                                           
+                                                                                                                                                                                   
+  - 创建成功：201                                                                                                                                                                  
+  - 删除成功：204                                                                                                                                                                  
+  - 参数错误：422                                                                                                                                                                  
+  - 找不到资源：404                                                                                                                                                                
+                                                                                                                                                                                   
+  不过很多国内项目仍然喜欢统一返回 200 + code，这也常见。                                                                                                                          
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 八、一句话判断 RESTful 是否合格                                                                                                                                                
+                                                                                                                                                                                   
+  你可以用这个标准问自己：                                                                                                                                                         
+                                                                                                                                                                                   
+  > 这个 URL 表示的是“资源”吗？                                                                                                                                                    
+  > 动作是不是由 HTTP 方法表达的？                                                                                                                                                 
+                                                                                                                                                                                   
+  如果答案是“是”，一般就比较 RESTful。                                                                                                                                             
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 九、推荐结论                                                                                                                                                                   
+                                                                                                                                                                                   
+  如果你要让 Controller 更符合 RESTful API，建议：                                                                                                                                 
+                                                                                                                                                                                   
+  ## 路由层面                                                                                                                                                                      
+                                                                                                                                                                                   
+  从：                                                                                                                                                                             
+                                                                                                                                                                                   
+  /demo-article/create                                                                                                                                                             
+  /demo-article/update                                                                                                                                                             
+  /demo-article/delete                                                                                                                                                             
+                                                                                                                                                                                   
+  改成：                                                                                                                                                                           
+                                                                                                                                                                                   
+  POST /articles                                                                                                                                                                   
+  PUT /articles/{id}                                                                                                                                                               
+  DELETE /articles/{id}                                                                                                                                                            
+                                                                                                                                                                                   
+  ## 方法命名层面                                                                                                                                                                  
+                                                                                                                                                                                   
+  推荐：                                                                                                                                                                           
+                                                                                                                                                                                   
+  - index                                                                                                                                                                          
+  - show                                                                                                                                                                           
+  - store                                                                                                                                                                          
+  - update                                                                                                                                                                         
+  - destroy                                                                                                                                                                        
+                                                                                                                                                                                   
+  ———
