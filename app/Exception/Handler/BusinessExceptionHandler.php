@@ -50,6 +50,9 @@ class BusinessExceptionHandler extends ExceptionHandler
     public function handle(Throwable $throwable, ResponseInterface $response)
     {
         if ($throwable instanceof BusinessException) {
+            // 告诉框架：这个异常到此为止，不要继续往后传递
+            $this->stopPropagation();
+
             return $this->response->json([
                 // 业务错误码
                 'code' => $throwable->getCode(),
