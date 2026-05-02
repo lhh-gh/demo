@@ -5670,3 +5670,239 @@ return [
   ## AOP 幂等校验“原子版” demo（基于 Redis SET NX EX）                                                                  
                                                                                                                         
   这个会更接近生产可用写法。
+
+
+
+# 最常见原因                                                                                                                                                                     
+                                                                                                                                                                                   
+  你自定义的 Idempotent 注解如果只是普通 PHP Attribute，在 Hyperf AOP 里通常不够。                                                                                                 
+  建议改成 继承 Hyperf\Di\Annotation\AbstractAnnotation。                                                                                                                          
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 正确写法                                                                                                                                                                       
+                                                                                                                                                                                   
+  ## 1）自定义注解                                                                                                                                                                 
+                                                                                                                                                                                   
+  文件：app/Annotation/Idempotent.php                                                                                                                                              
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  namespace App\Annotation;                                                                                                                                                        
+                                                                                                                                                                                   
+  use Attribute;                                                                                                                                                                   
+  use Hyperf\Di\Annotation\AbstractAnnotation;                                                                                                                                     
+                                                                                                                                                                                   
+  #[Attribute(Attribute::TARGET_METHOD)]                                                                                                                                           
+  class Idempotent extends AbstractAnnotation                                                                                                                                      
+  {                                                                                                                                                                                
+      public function __construct(                                                                                                                                                 
+          public string $prefix = 'idempotent',                                                                                                                                    
+          public int $ttl = 5                                                                                                                                                      
+      ) {                                                                                                                                                                          
+      }                                                                                                                                                                            
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 2）切面                                                                                                                                                                       
+                                                                                                                                                                                   
+  我顺手帮你改成更严谨的 原子版，直接用 Redis SET NX EX。                                                                                                                          
+                                                                                                                                                                                   
+  文件：app/Aspect/IdempotentAspect.php                                                                                                                                            
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  namespace App\Aspect;                                                                                                                                                            
+                                                                                                                                                                                   
+  use App\Annotation\Idempotent;                                                                                                                                                   
+  use App\Service\RedisService;                                                                                                                                                    
+  use Hyperf\Context\Context;                                                                                                                                                      
+  use Hyperf\Di\Annotation\Aspect;                                                                                                                                                 
+  use Hyperf\Di\Aop\AbstractAspect;                                                                                                                                                
+  use Hyperf\Di\Aop\ProceedingJoinPoint;                                                                                                                                           
+  use Hyperf\Di\ReflectionManager;                                                                                                                                                 
+  use Psr\Http\Message\ServerRequestInterface;                                                                                                                                     
+                                                                                                                                                                                   
+  #[Aspect]                                                                                                                                                                        
+  class IdempotentAspect extends AbstractAspect                                                                                                                                    
+  {                                                                                                                                                                                
+      /**                                                                                                                                                                          
+       * 按自定义注解切入                                                                                                                                                          
+       */                                                                                                                                                                          
+      public array $annotations = [                                                                                                                                                
+          Idempotent::class,                                                                                                                                                       
+      ];                                                                                                                                                                           
+                                                                                                                                                                                   
+      public function __construct(                                                                                                                                                 
+          protected RedisService $redisService                                                                                                                                     
+      ) {                                                                                                                                                                          
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      public function process(ProceedingJoinPoint $proceedingJoinPoint)                                                                                                            
+      {                                                                                                                                                                            
+          $className = $proceedingJoinPoint->className;                                                                                                                            
+          $methodName = $proceedingJoinPoint->methodName;                                                                                                                          
+                                                                                                                                                                                   
+          $reflectionMethod = ReflectionManager::reflectMethod($className, $methodName);                                                                                           
+          $attributes = $reflectionMethod->getAttributes(Idempotent::class);                                                                                                       
+                                                                                                                                                                                   
+          if (empty($attributes)) {                                                                                                                                                
+              return $proceedingJoinPoint->process();                                                                                                                              
+          }                                                                                                                                                                        
+                                                                                                                                                                                   
+          /** @var Idempotent $annotation */                                                                                                                                       
+          $annotation = $attributes[0]->newInstance();                                                                                                                             
+                                                                                                                                                                                   
+          /** @var ServerRequestInterface|null $request */                                                                                                                         
+          $request = Context::get(ServerRequestInterface::class);                                                                                                                  
+                                                                                                                                                                                   
+          if (! $request) {                                                                                                                                                        
+              return $proceedingJoinPoint->process();                                                                                                                              
+          }                                                                                                                                                                        
+                                                                                                                                                                                   
+          $idempotencyKey = $request->getHeaderLine('Idempotency-Key');                                                                                                            
+                                                                                                                                                                                   
+          if ($idempotencyKey === '') {                                                                                                                                            
+              return [                                                                                                                                                             
+                  'code' => 400,                                                                                                                                                   
+                  'message' => '缺少 Idempotency-Key 请求头',                                                                                                                      
+                  'data' => null,                                                                                                                                                  
+              ];                                                                                                                                                                   
+          }                                                                                                                                                                        
+                                                                                                                                                                                   
+          $redisKey = sprintf(                                                                                                                                                     
+              '%s:%s:%s',                                                                                                                                                          
+              $annotation->prefix,                                                                                                                                                 
+              $methodName,                                                                                                                                                         
+              $idempotencyKey                                                                                                                                                      
+          );                                                                                                                                                                       
+                                                                                                                                                                                   
+          // 原子幂等校验：SET key value NX EX ttl                                                                                                                                 
+          $success = $this->redisService->getClient()->set(                                                                                                                        
+              $redisKey,                                                                                                                                                           
+              1,                                                                                                                                                                   
+              ['nx', 'ex' => $annotation->ttl]                                                                                                                                     
+          );                                                                                                                                                                       
+                                                                                                                                                                                   
+          if (! $success) {                                                                                                                                                        
+              return [                                                                                                                                                             
+                  'code' => 409,                                                                                                                                                   
+                  'message' => '重复请求，请勿重复提交',                                                                                                                           
+                  'data' => null,                                                                                                                                                  
+              ];                                                                                                                                                                   
+          }                                                                                                                                                                        
+                                                                                                                                                                                   
+          return $proceedingJoinPoint->process();                                                                                                                                  
+      }                                                                                                                                                                            
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 3）你的 Controller 写法可以继续用                                                                                                                                             
+                                                                                                                                                                                   
+  #[Idempotent(prefix: 'order:test', ttl: 10)]                                                                                                                                     
+  #[PostMapping('test')]                                                                                                                                                           
+  public function test(): array                                                                                                                                                    
+  {                                                                                                                                                                                
+      return [                                                                                                                                                                     
+          'code' => 0,                                                                                                                                                             
+          'message' => '下单成功',                                                                                                                                                 
+          'data' => [                                                                                                                                                              
+              'order_no' => 'ORD' . date('YmdHis'),                                                                                                                                
+          ],                                                                                                                                                                       
+      ];                                                                                                                                                                           
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 你还必须做的 2 件事                                                                                                                                                            
+                                                                                                                                                                                   
+  ## 1）清理代理缓存                                                                                                                                                               
+                                                                                                                                                                                   
+  Hyperf AOP 会生成代理类，不清缓存有时不会重新生效。                                                                                                                              
+                                                                                                                                                                                   
+  删掉：                                                                                                                                                                           
+                                                                                                                                                                                   
+  runtime/container/proxy                                                                                                                                                          
+  runtime/container/scan.cache                                                                                                                                                     
+                                                                                                                                                                                   
+  如果你在 Linux/WSL 里：                                                                                                                                                          
+                                                                                                                                                                                   
+  rm -rf runtime/container/proxy                                                                                                                                                   
+  rm -f runtime/container/scan.cache                                                                                                                                               
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 2）重启 Hyperf                                                                                                                                                                
+                                                                                                                                                                                   
+  php bin/hyperf.php stop                                                                                                                                                          
+  php bin/hyperf.php start                                                                                                                                                         
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 正确测试方式                                                                                                                                                                   
+                                                                                                                                                                                   
+  请求必须带这个请求头：                                                                                                                                                           
+                                                                                                                                                                                   
+  Idempotency-Key: abc123                                                                                                                                                          
+                                                                                                                                                                                   
+  例如：                                                                                                                                                                           
+                                                                                                                                                                                   
+  ## 第一次请求                                                                                                                                                                    
+                                                                                                                                                                                   
+  curl -X POST http://localhost:9501/order/test -H "Idempotency-Key: abc123"                                                                                                       
+                                                                                                                                                                                   
+  返回：                                                                                                                                                                           
+                                                                                                                                                                                   
+  {                                                                                                                                                                                
+    "code": 0,                                                                                                                                                                     
+    "message": "下单成功",                                                                                                                                                         
+    "data": {                                                                                                                                                                      
+      "order_no": "ORD20260502081717"                                                                                                                                              
+    }                                                                                                                                                                              
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ## 第二次请求（10 秒内同一个 key）                                                                                                                                               
+                                                                                                                                                                                   
+  curl -X POST http://localhost:9501/order/test -H "Idempotency-Key: abc123"                                                                                                       
+                                                                                                                                                                                   
+  返回：                                                                                                                                                                           
+                                                                                                                                                                                   
+  {                                                                                                                                                                                
+    "code": 409,                                                                                                                                                                   
+    "message": "重复请求，请勿重复提交",                                                                                                                                           
+    "data": null                                                                                                                                                                   
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 如果你还是没触发                                                                                                                                                               
+                                                                                                                                                                                   
+  再检查这几个点：                                                                                                                                                                 
+                                                                                                                                                                                   
+  ## 1）IdempotentAspect 文件是否在 app/Aspect                                                                                                                                     
+                                                                                                                                                                                   
+  ## 2）Idempotent 文件是否在 app/Annotation                                                                                                                                       
+                                                                                                                                                                                   
+  ## 3）Idempotent 是否 extends AbstractAnnotation                                                                                                                                 
+                                                                                                                                                                                   
+  ## 4）是否清了 runtime/container/proxy                                                                                                                                           
+                                                                                                                                                                                   
+  ## 5）是否真的重启了服务                                                                                                                                                         
+                                                                                                                                                                                   
+  ## 6）请求里是否带了 Idempotency-Key                                                                                                                                             
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 建议你先加一个调试输出                                                                                                                                                         
+                                                                                                                                                                                   
+  在切面 process() 最前面临时加：                                                                                                                                                  
+                                                                                                                                                                                   
+  var_dump('IdempotentAspect triggered');                                                                                                                                          
+                                                                                                                                                                                   
+  如果请求 /order/test 完全没输出，说明就是 切面没织入成功。
