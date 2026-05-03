@@ -11804,4 +11804,1761 @@ return [
   > 用 BF.RESERVE 建过滤器，用 BF.ADD / BF.MADD 灌入 ID，用 BF.EXISTS 在查缓存/数据库前做存在性预判。                                                                              
                                                                                                                                                                                    
   ———
+# 一、Hyperf Command 版初始化 Bloom Filter                                                                                                                                       
+                                                                                                                                                                                   
+  企业里更推荐用 Command 来做：                                                                                                                                                    
+                                                                                                                                                                                   
+  - 首次初始化 Bloom Filter                                                                                                                                                        
+  - 定时重建 Bloom Filter                                                                                                                                                          
+  - 发布后同步数据                                                                                                                                                                 
+  - 修复过滤器数据                                                                                                                                                                 
+                                                                                                                                                                                   
+  这样比手动调接口更规范。                                                                                                                                                         
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 1. Command 文件                                                                                                                                                               
+                                                                                                                                                                                   
+  文件：app/Command/InitProductBloomFilterCommand.php                                                                                                                              
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  namespace App\Command;                                                                                                                                                           
+                                                                                                                                                                                   
+  use App\Service\ProductBloomInitService;                                                                                                                                         
+  use Hyperf\Command\Annotation\Command;                                                                                                                                           
+  use Hyperf\Command\Command as HyperfCommand;                                                                                                                                     
+  use Symfony\Component\Console\Input\InputOption;                                                                                                                                 
+                                                                                                                                                                                   
+  #[Command]                                                                                                                                                                       
+  class InitProductBloomFilterCommand extends HyperfCommand                                                                                                                        
+  {                                                                                                                                                                                
+      public function __construct(                                                                                                                                                 
+          protected ProductBloomInitService $bloomInitService                                                                                                                      
+      ) {                                                                                                                                                                          
+          parent::__construct('bloom:init-products');                                                                                                                              
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 配置命令说明                                                                                                                                                              
+       */                                                                                                                                                                          
+      public function configure()                                                                                                                                                  
+      {                                                                                                                                                                            
+          parent::configure();                                                                                                                                                     
+                                                                                                                                                                                   
+          $this->setDescription('初始化 demo_products 商品 ID 到 RedisBloom');                                                                                                     
+                                                                                                                                                                                   
+          $this->addOption(                                                                                                                                                        
+              'force',                                                                                                                                                             
+              null,                                                                                                                                                                
+              InputOption::VALUE_NONE,                                                                                                                                             
+              '是否强制重新初始化 Bloom Filter'                                                                                                                                    
+          );                                                                                                                                                                       
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 执行命令                                                                                                                                                                  
+       */                                                                                                                                                                          
+      public function handle()                                                                                                                                                     
+      {                                                                                                                                                                            
+          $force = (bool) $this->input->getOption('force');                                                                                                                        
+                                                                                                                                                                                   
+          if ($force) {                                                                                                                                                            
+              $this->line('开始强制重建 Bloom Filter...', 'info');                                                                                                                 
+          } else {                                                                                                                                                                 
+              $this->line('开始初始化 Bloom Filter...', 'info');                                                                                                                   
+          }                                                                                                                                                                        
+                                                                                                                                                                                   
+          $result = $this->bloomInitService->init($force);                                                                                                                         
+                                                                                                                                                                                   
+          $this->line(sprintf(                                                                                                                                                     
+              '初始化完成，key=%s，数量=%d',                                                                                                                                       
+              $result['key'],                                                                                                                                                      
+              $result['count']                                                                                                                                                     
+          ), 'info');                                                                                                                                                              
+      }                                                                                                                                                                            
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 2. 初始化服务增强版                                                                                                                                                           
+                                                                                                                                                                                   
+  文件：app/Service/ProductBloomInitService.php                                                                                                                                    
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  namespace App\Service;                                                                                                                                                           
+                                                                                                                                                                                   
+  use App\Model\DemoProduct;                                                                                                                                                       
+                                                                                                                                                                                   
+  class ProductBloomInitService                                                                                                                                                    
+  {                                                                                                                                                                                
+      public function __construct(                                                                                                                                                 
+          protected RedisBloomService $bloomService,                                                                                                                               
+          protected RedisService $redisService                                                                                                                                     
+      ) {                                                                                                                                                                          
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 商品 Bloom Filter key                                                                                                                                                     
+       */                                                                                                                                                                          
+      protected function getBloomKey(): string                                                                                                                                     
+      {                                                                                                                                                                            
+          return 'bf:demo_product:ids';                                                                                                                                            
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 初始化 / 重建商品 ID 布隆过滤器                                                                                                                                           
+       *                                                                                                                                                                           
+       * @param bool $force 是否强制删除旧过滤器并重新初始化                                                                                                                       
+       */                                                                                                                                                                          
+      public function init(bool $force = false): array                                                                                                                             
+      {                                                                                                                                                                            
+          $key = $this->getBloomKey();                                                                                                                                             
+                                                                                                                                                                                   
+          if ($force) {                                                                                                                                                            
+              $this->redisService->delete($key);                                                                                                                                   
+          }                                                                                                                                                                        
+                                                                                                                                                                                   
+          // 创建过滤器                                                                                                                                                            
+          $this->bloomService->reserve($key, 0.001, 100000);                                                                                                                       
+                                                                                                                                                                                   
+          // 从数据库读取商品 ID                                                                                                                                                   
+          $ids = DemoProduct::query()->pluck('id')->toArray();                                                                                                                     
+                                                                                                                                                                                   
+          if (! empty($ids)) {                                                                                                                                                     
+              $this->bloomService->madd($key, $ids);                                                                                                                               
+          }                                                                                                                                                                        
+                                                                                                                                                                                   
+          return [                                                                                                                                                                 
+              'key' => $key,                                                                                                                                                       
+              'count' => count($ids),                                                                                                                                              
+          ];                                                                                                                                                                       
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 新增商品后，补充一个 ID                                                                                                                                                   
+       */                                                                                                                                                                          
+      public function addOne(int $id): bool                                                                                                                                        
+      {                                                                                                                                                                            
+          return $this->bloomService->add($this->getBloomKey(), $id);                                                                                                              
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 判断商品 ID 是否可能存在                                                                                                                                                  
+       */                                                                                                                                                                          
+      public function mightContain(int $id): bool                                                                                                                                  
+      {                                                                                                                                                                            
+          return $this->bloomService->exists($this->getBloomKey(), $id);                                                                                                           
+      }                                                                                                                                                                            
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 3. 执行命令                                                                                                                                                                   
+                                                                                                                                                                                   
+  初始化：                                                                                                                                                                         
+                                                                                                                                                                                   
+  php bin/hyperf.php bloom:init-products                                                                                                                                           
+                                                                                                                                                                                   
+  强制重建：                                                                                                                                                                       
+                                                                                                                                                                                   
+  php bin/hyperf.php bloom:init-products --force                                                                                                                                   
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 二、Cuckoo Filter（支持删除）版本 demo                                                                                                                                         
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 1. 为什么要 Cuckoo Filter                                                                                                                                                     
+                                                                                                                                                                                   
+  你前面已经知道：                                                                                                                                                                 
+                                                                                                                                                                                   
+  ### Bloom Filter                                                                                                                                                                 
+                                                                                                                                                                                   
+  优点：                                                                                                                                                                           
+                                                                                                                                                                                   
+  - 省内存                                                                                                                                                                         
+  - 快                                                                                                                                                                             
+                                                                                                                                                                                   
+  缺点：                                                                                                                                                                           
+                                                                                                                                                                                   
+  - 不支持删除                                                                                                                                                                     
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ### Cuckoo Filter                                                                                                                                                                
+                                                                                                                                                                                   
+  优点：                                                                                                                                                                           
+                                                                                                                                                                                   
+  - 支持删除                                                                                                                                                                       
+  - 也适合做存在性判断                                                                                                                                                             
+  - 某些场景下比 Bloom 更实用                                                                                                                                                      
+                                                                                                                                                                                   
+  官方文档说明 Cuckoo Filter 支持：                                                                                                                                                
+                                                                                                                                                                                   
+  - CF.RESERVE                                                                                                                                                                     
+  - CF.ADD                                                                                                                                                                         
+  - CF.EXISTS                                                                                                                                                                      
+  - CF.DEL                                                                                                                                                                         
+                                                                                                                                                                                   
+  来源：                                                                                                                                                                           
+                                                                                                                                                                                   
+  - Redis Cuckoo Filter 文档：https://redis.io/docs/latest/develop/data-types/probabilistic/cuckoo-filter/                                                                         
+  - CF.DEL 命令：https://redis.io/docs/latest/commands/cf.del/                                                                                                                     
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 2. Hyperf Cuckoo Filter Service                                                                                                                                               
+                                                                                                                                                                                   
+  文件：app/Service/RedisCuckooService.php                                                                                                                                         
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  namespace App\Service;                                                                                                                                                           
+                                                                                                                                                                                   
+  use Hyperf\Di\Annotation\Inject;                                                                                                                                                 
+  use Hyperf\Redis\Redis;                                                                                                                                                          
+                                                                                                                                                                                   
+  class RedisCuckooService                                                                                                                                                         
+  {                                                                                                                                                                                
+      #[Inject]                                                                                                                                                                    
+      protected Redis $redis;                                                                                                                                                      
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 创建 Cuckoo Filter                                                                                                                                                        
+       *                                                                                                                                                                           
+       * @param string $key 过滤器 key                                                                                                                                             
+       * @param int $capacity 初始容量                                                                                                                                             
+       * @param int $bucketSize 桶大小，可选                                                                                                                                       
+       * @param int $maxIterations 最大踢出次数，可选                                                                                                                              
+       * @param int $expansion 扩容倍率，可选                                                                                                                                      
+       */                                                                                                                                                                          
+      public function reserve(                                                                                                                                                     
+          string $key,                                                                                                                                                             
+          int $capacity = 100000,                                                                                                                                                  
+          int $bucketSize = 2,                                                                                                                                                     
+          int $maxIterations = 20,                                                                                                                                                 
+          int $expansion = 1                                                                                                                                                       
+      ): bool {                                                                                                                                                                    
+          $result = $this->redis->rawCommand(                                                                                                                                      
+              'CF.RESERVE',                                                                                                                                                        
+              $key,                                                                                                                                                                
+              (string) $capacity,                                                                                                                                                  
+              'BUCKETSIZE',                                                                                                                                                        
+              (string) $bucketSize,                                                                                                                                                
+              'MAXITERATIONS',                                                                                                                                                     
+              (string) $maxIterations,                                                                                                                                             
+              'EXPANSION',                                                                                                                                                         
+              (string) $expansion                                                                                                                                                  
+          );                                                                                                                                                                       
+                                                                                                                                                                                   
+          return $result === 'OK';                                                                                                                                                 
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 添加元素                                                                                                                                                                  
+       */                                                                                                                                                                          
+      public function add(string $key, string|int $item): bool                                                                                                                     
+      {                                                                                                                                                                            
+          $result = $this->redis->rawCommand('CF.ADD', $key, (string) $item);                                                                                                      
+                                                                                                                                                                                   
+          return (bool) $result;                                                                                                                                                   
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 判断元素是否存在                                                                                                                                                          
+       *                                                                                                                                                                           
+       * true：可能存在                                                                                                                                                            
+       * false：一定不存在                                                                                                                                                         
+       */                                                                                                                                                                          
+      public function exists(string $key, string|int $item): bool                                                                                                                  
+      {                                                                                                                                                                            
+          $result = $this->redis->rawCommand('CF.EXISTS', $key, (string) $item);                                                                                                   
+                                                                                                                                                                                   
+          return (bool) $result;                                                                                                                                                   
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 删除元素                                                                                                                                                                  
+       *                                                                                                                                                                           
+       * 返回 true 表示删除成功                                                                                                                                                    
+       * 返回 false 表示元素不存在                                                                                                                                                 
+       */                                                                                                                                                                          
+      public function del(string $key, string|int $item): bool                                                                                                                     
+      {                                                                                                                                                                            
+          $result = $this->redis->rawCommand('CF.DEL', $key, (string) $item);                                                                                                      
+                                                                                                                                                                                   
+          return (bool) $result;                                                                                                                                                   
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 查看过滤器信息                                                                                                                                                            
+       */                                                                                                                                                                          
+      public function info(string $key): mixed                                                                                                                                     
+      {                                                                                                                                                                            
+          return $this->redis->rawCommand('CF.INFO', $key);                                                                                                                        
+      }                                                                                                                                                                            
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 3. Cuckoo Filter 商品 ID 服务                                                                                                                                                 
+                                                                                                                                                                                   
+  文件：app/Service/ProductCuckooFilterService.php                                                                                                                                 
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  namespace App\Service;                                                                                                                                                           
+                                                                                                                                                                                   
+  use App\Model\DemoProduct;                                                                                                                                                       
+                                                                                                                                                                                   
+  class ProductCuckooFilterService                                                                                                                                                 
+  {                                                                                                                                                                                
+      public function __construct(                                                                                                                                                 
+          protected RedisCuckooService $cuckooService,                                                                                                                             
+          protected RedisService $redisService                                                                                                                                     
+      ) {                                                                                                                                                                          
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      protected function getFilterKey(): string                                                                                                                                    
+      {                                                                                                                                                                            
+          return 'cf:demo_product:ids';                                                                                                                                            
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 初始化商品 ID 到 Cuckoo Filter                                                                                                                                            
+       */                                                                                                                                                                          
+      public function init(bool $force = false): array                                                                                                                             
+      {                                                                                                                                                                            
+          $key = $this->getFilterKey();                                                                                                                                            
+                                                                                                                                                                                   
+          if ($force) {                                                                                                                                                            
+              $this->redisService->delete($key);                                                                                                                                   
+          }                                                                                                                                                                        
+                                                                                                                                                                                   
+          $this->cuckooService->reserve($key, 100000);                                                                                                                             
+                                                                                                                                                                                   
+          $ids = DemoProduct::query()->pluck('id')->toArray();                                                                                                                     
+                                                                                                                                                                                   
+          foreach ($ids as $id) {                                                                                                                                                  
+              $this->cuckooService->add($key, $id);                                                                                                                                
+          }                                                                                                                                                                        
+                                                                                                                                                                                   
+          return [                                                                                                                                                                 
+              'key' => $key,                                                                                                                                                       
+              'count' => count($ids),                                                                                                                                              
+          ];                                                                                                                                                                       
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 新增商品时添加 ID                                                                                                                                                         
+       */                                                                                                                                                                          
+      public function addOne(int $id): bool                                                                                                                                        
+      {                                                                                                                                                                            
+          return $this->cuckooService->add($this->getFilterKey(), $id);                                                                                                            
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 删除商品时移除 ID                                                                                                                                                         
+       */                                                                                                                                                                          
+      public function removeOne(int $id): bool                                                                                                                                     
+      {                                                                                                                                                                            
+          return $this->cuckooService->del($this->getFilterKey(), $id);                                                                                                            
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 判断商品 ID 是否可能存在                                                                                                                                                  
+       */                                                                                                                                                                          
+      public function mightContain(int $id): bool                                                                                                                                  
+      {                                                                                                                                                                            
+          return $this->cuckooService->exists($this->getFilterKey(), $id);                                                                                                         
+      }                                                                                                                                                                            
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 4. Repository 接入 Cuckoo Filter                                                                                                                                              
+                                                                                                                                                                                   
+  文件：app/Repository/DemoProductCuckooRepository.php                                                                                                                             
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  namespace App\Repository;                                                                                                                                                        
+                                                                                                                                                                                   
+  use App\Model\DemoProduct;                                                                                                                                                       
+  use App\Service\ProductCuckooFilterService;                                                                                                                                      
+  use App\Service\RedisService;                                                                                                                                                    
+                                                                                                                                                                                   
+  class DemoProductCuckooRepository                                                                                                                                                
+  {                                                                                                                                                                                
+      public function __construct(                                                                                                                                                 
+          protected RedisService $redisService,                                                                                                                                    
+          protected ProductCuckooFilterService $cuckooFilterService                                                                                                                
+      ) {                                                                                                                                                                          
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      protected function getDetailCacheKey(int $id): string                                                                                                                        
+      {                                                                                                                                                                            
+          return "demo_product:cuckoo:detail:{$id}";                                                                                                                               
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 使用 Cuckoo Filter 做存在性判断                                                                                                                                           
+       */                                                                                                                                                                          
+      public function findByIdWithCuckoo(int $id): ?array                                                                                                                          
+      {                                                                                                                                                                            
+          if (! $this->cuckooFilterService->mightContain($id)) {                                                                                                                   
+              return null;                                                                                                                                                         
+          }                                                                                                                                                                        
+                                                                                                                                                                                   
+          $cacheKey = $this->getDetailCacheKey($id);                                                                                                                               
+          $cached = $this->redisService->get($cacheKey, true);                                                                                                                     
+                                                                                                                                                                                   
+          if (is_array($cached)) {                                                                                                                                                 
+              return $cached;                                                                                                                                                      
+          }                                                                                                                                                                        
+                                                                                                                                                                                   
+          if ($cached === '__NULL__') {                                                                                                                                            
+              return null;                                                                                                                                                         
+          }                                                                                                                                                                        
+                                                                                                                                                                                   
+          $product = DemoProduct::query()->find($id);                                                                                                                              
+                                                                                                                                                                                   
+          if (! $product) {                                                                                                                                                        
+              $this->redisService->set($cacheKey, '__NULL__', 60);                                                                                                                 
+              return null;                                                                                                                                                         
+          }                                                                                                                                                                        
+                                                                                                                                                                                   
+          $data = $product->toArray();                                                                                                                                             
+          $this->redisService->set($cacheKey, $data, 600);                                                                                                                         
+                                                                                                                                                                                   
+          return $data;                                                                                                                                                            
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 新增商品后同步加入 Cuckoo Filter                                                                                                                                          
+       */                                                                                                                                                                          
+      public function create(array $data): array                                                                                                                                   
+      {                                                                                                                                                                            
+          $product = DemoProduct::query()->create($data);                                                                                                                          
+                                                                                                                                                                                   
+          $this->cuckooFilterService->addOne((int) $product->id);                                                                                                                  
+                                                                                                                                                                                   
+          return $product->toArray();                                                                                                                                              
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 删除商品后同步从 Cuckoo Filter 移除                                                                                                                                       
+       */                                                                                                                                                                          
+      public function deleteById(int $id): bool                                                                                                                                    
+      {                                                                                                                                                                            
+          $result = (bool) DemoProduct::query()                                                                                                                                    
+              ->where('id', $id)                                                                                                                                                   
+              ->delete();                                                                                                                                                          
+                                                                                                                                                                                   
+          if ($result) {                                                                                                                                                           
+              $this->cuckooFilterService->removeOne($id);                                                                                                                          
+              $this->redisService->delete($this->getDetailCacheKey($id));                                                                                                          
+          }                                                                                                                                                                        
+                                                                                                                                                                                   
+          return $result;                                                                                                                                                          
+      }                                                                                                                                                                            
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 5. Controller demo                                                                                                                                                            
+                                                                                                                                                                                   
+  文件：app/Controller/ProductCuckooController.php                                                                                                                                 
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  namespace App\Controller;                                                                                                                                                        
+                                                                                                                                                                                   
+  use App\Repository\DemoProductCuckooRepository;                                                                                                                                  
+  use App\Service\ProductCuckooFilterService;                                                                                                                                      
+  use Hyperf\HttpServer\Annotation\Controller;                                                                                                                                     
+  use Hyperf\HttpServer\Annotation\DeleteMapping;                                                                                                                                  
+  use Hyperf\HttpServer\Annotation\GetMapping;                                                                                                                                     
+  use Hyperf\HttpServer\Annotation\PostMapping;                                                                                                                                    
+                                                                                                                                                                                   
+  #[Controller(prefix: 'product-cuckoo')]                                                                                                                                          
+  class ProductCuckooController                                                                                                                                                    
+  {                                                                                                                                                                                
+      public function __construct(                                                                                                                                                 
+          protected ProductCuckooFilterService $filterService,                                                                                                                     
+          protected DemoProductCuckooRepository $repository                                                                                                                        
+      ) {                                                                                                                                                                          
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 初始化 Cuckoo Filter                                                                                                                                                      
+       */                                                                                                                                                                          
+      #[PostMapping('init')]                                                                                                                                                       
+      public function init(): array                                                                                                                                                
+      {                                                                                                                                                                            
+          return [                                                                                                                                                                 
+              'code' => 0,                                                                                                                                                         
+              'message' => 'Cuckoo Filter 初始化成功',                                                                                                                             
+              'data' => $this->filterService->init(true),                                                                                                                          
+          ];                                                                                                                                                                       
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 查询商品详情                                                                                                                                                              
+       */                                                                                                                                                                          
+      #[GetMapping('detail/{id:\d+}')]                                                                                                                                             
+      public function detail(int $id): array                                                                                                                                       
+      {                                                                                                                                                                            
+          return [                                                                                                                                                                 
+              'code' => 0,                                                                                                                                                         
+              'message' => 'success',                                                                                                                                              
+              'data' => $this->repository->findByIdWithCuckoo($id),                                                                                                                
+          ];                                                                                                                                                                       
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 删除商品（演示 Cuckoo Filter 支持删除）                                                                                                                                   
+       */                                                                                                                                                                          
+      #[DeleteMapping('{id:\d+}')]                                                                                                                                                 
+      public function delete(int $id): array                                                                                                                                       
+      {                                                                                                                                                                            
+          return [                                                                                                                                                                 
+              'data' => null,                                                                                                                                                      
+          ];                                                                                                                                                                       
+      }                                                                                                                                                                            
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 三、Bloom Filter 和 Cuckoo Filter 怎么选                                                                                                                                       
+                                                                                                                                                                                   
+  ## 用 Bloom Filter 的场景                                                                                                                                                        
+                                                                                                                                                                                   
+  - 主键很多                                                                                                                                                                       
+  - 删除少                                                                                                                                                                         
+  - 更在意节省内存                                                                                                                                                                 
+  - 做存在性预判就够了                                                                                                                                                             
+                                                                                                                                                                                   
+  ## 用 Cuckoo Filter 的场景                                                                                                                                                       
+                                                                                                                                                                                   
+  - 需要删除元素                                                                                                                                                                   
+  - 数据变化比较频繁                                                                                                                                                               
+  - 需要比 Bloom 更灵活                                                                                                                                                            
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 四、一句话总结                                                                                                                                                                 
+                                                                                                                                                                                   
+  ## Hyperf Command 版初始化 Bloom Filter                                                                                                                                          
+                                                                                                                                                                                   
+  适合：                                                                                                                                                                           
+                                                                                                                                                                                   
+  > 启动初始化、定时重建、发布后同步                                                                                                                                               
+                                                                                                                                                                                   
+  ## Cuckoo Filter 版                                                                                                                                                              
+                                                                                                                                                                                   
+  适合：                                                                                                                                                                           
+                                                                                                                                                                                   
+  > 需要支持删除的存在性过滤场景
 
+
+- 安装 hyperf/model-cache                                                                                                                                                        
+  - Model 实现 CacheableInterface                                                                                                                                                  
+  - 引入 Cacheable trait                                                                                                                                                           
+  - 然后直接调用：                                                                                                                                                                 
+                                                                                                                                                                                   
+  User::findFromCache($id);                                                                                                                                                        
+  User::findManyFromCache($ids);                                                                                                                                                   
+                                                                                                                                                                                   
+  这和我们前面手写的：                                                                                                                                                             
+                                                                                                                                                                                   
+  - Repository + RedisService                                                                                                                                                      
+  - 自己设计 key                                                                                                                                                                   
+  - 自己控制删缓存 / 重建缓存                                                                                                                                                      
+                                                                                                                                                                                   
+  是两种不同路线。                                                                                                                                                                 
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 一、官方模型缓存是什么思路                                                                                                                                                     
+                                                                                                                                                                                   
+  你贴的这种：                                                                                                                                                                     
+                                                                                                                                                                                   
+  class User extends Model implements CacheableInterface                                                                                                                           
+  {                                                                                                                                                                                
+      use Cacheable;                                                                                                                                                               
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  然后：                                                                                                                                                                           
+                                                                                                                                                                                   
+  $model = User::findFromCache($id);                                                                                                                                               
+  $models = User::findManyFromCache($ids);                                                                                                                                         
+                                                                                                                                                                                   
+  本质上是：                                                                                                                                                                       
+                                                                                                                                                                                   
+  > 把“按主键查询模型”的缓存能力，直接集成到 Model 上。                                                                                                                            
+                                                                                                                                                                                   
+  官方文档说明：                                                                                                                                                                   
+                                                                                                                                                                                   
+  - 这是 hyperf/model-cache                                                                                                                                                        
+  - 主要针对 Model 数据自动缓存                                                                                                                                                    
+  - 删除、修改、累加、累减时会自动处理相关缓存                                                                                                                                     
+  - 当前只支持 Redis 存储驱动                                                                                                                                                      
+                                                                                                                                                                                   
+  来源：                                                                                                                                                                           
+                                                                                                                                                                                   
+  - Hyperf 模型缓存文档：https://geekdaxue.co/read/hyperf-3.0-doc/docs-zh-cn-db-model-cache.md                                                                                     
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 二、它和我们前面手写模型缓存的区别                                                                                                                                             
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 方案 A：官方 ModelCache                                                                                                                                                       
+                                                                                                                                                                                   
+  你贴的这种。                                                                                                                                                                     
+                                                                                                                                                                                   
+  ### 特点                                                                                                                                                                         
+                                                                                                                                                                                   
+  - 写法简单                                                                                                                                                                       
+  - 直接在 Model 上用                                                                                                                                                              
+  - 主键查询最方便                                                                                                                                                                 
+  - 自动处理模型缓存更新                                                                                                                                                           
+                                                                                                                                                                                   
+  例如：                                                                                                                                                                           
+                                                                                                                                                                                   
+  User::findFromCache($id);                                                                                                                                                        
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 方案 B：手写 Repository + Redis 缓存                                                                                                                                          
+                                                                                                                                                                                   
+  我们前面写的这种。                                                                                                                                                               
+                                                                                                                                                                                   
+  ### 特点                                                                                                                                                                         
+                                                                                                                                                                                   
+  - 更灵活                                                                                                                                                                         
+  - key 自己设计                                                                                                                                                                   
+  - 列表缓存更容易扩展                                                                                                                                                             
+  - 可以做穿透 / 击穿 / 雪崩保护                                                                                                                                                   
+  - 更适合企业项目复杂场景                                                                                                                                                         
+                                                                                                                                                                                   
+  例如：                                                                                                                                                                           
+                                                                                                                                                                                   
+  $this->repository->findByIdWithCache($id);                                                                                                                                       
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 三、官方模型缓存的优点                                                                                                                                                         
+                                                                                                                                                                                   
+  ## 1）开发简单                                                                                                                                                                   
+                                                                                                                                                                                   
+  这是最大优点。                                                                                                                                                                   
+                                                                                                                                                                                   
+  只要：                                                                                                                                                                           
+                                                                                                                                                                                   
+  use Cacheable;                                                                                                                                                                   
+  implements CacheableInterface                                                                                                                                                    
+                                                                                                                                                                                   
+  然后：                                                                                                                                                                           
+                                                                                                                                                                                   
+  User::findFromCache($id);                                                                                                                                                        
+                                                                                                                                                                                   
+  就能用了。                                                                                                                                                                       
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 2）主键查询很方便                                                                                                                                                             
+                                                                                                                                                                                   
+  适合这种场景：                                                                                                                                                                   
+                                                                                                                                                                                   
+  - 用户详情                                                                                                                                                                       
+  - 商品详情                                                                                                                                                                       
+  - 文章详情                                                                                                                                                                       
+  - 主键查单条数据                                                                                                                                                                 
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 3）和 Model 绑定紧密                                                                                                                                                          
+                                                                                                                                                                                   
+  使用成本低，不需要额外自己封装太多 Redis 逻辑。                                                                                                                                  
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 4）自动维护模型缓存                                                                                                                                                           
+                                                                                                                                                                                   
+  官方文档说明：                                                                                                                                                                   
+                                                                                                                                                                                   
+  - 删除和修改模型时，会自动删除/更新缓存                                                                                                                                          
+  - 自增、自减也会同步调整缓存                                                                                                                                                     
+                                                                                                                                                                                   
+  这点很省事。                                                                                                                                                                     
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 四、官方模型缓存的局限                                                                                                                                                         
+                                                                                                                                                                                   
+  这也是为什么企业项目不一定全用它。                                                                                                                                               
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 1）更偏“单模型主键缓存”                                                                                                                                                       
+                                                                                                                                                                                   
+  官方这个能力最适合：                                                                                                                                                             
+                                                                                                                                                                                   
+  findFromCache($id)                                                                                                                                                               
+  findManyFromCache($ids)                                                                                                                                                          
+                                                                                                                                                                                   
+  也就是说它最擅长的是：                                                                                                                                                           
+                                                                                                                                                                                   
+  > 按主键查模型                                                                                                                                                                   
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 2）不擅长复杂列表缓存                                                                                                                                                         
+                                                                                                                                                                                   
+  比如你要缓存：                                                                                                                                                                   
+                                                                                                                                                                                   
+  - 商品列表                                                                                                                                                                       
+  - 分类文章列表                                                                                                                                                                   
+  - 搜索结果列表                                                                                                                                                                   
+  - 分页列表                                                                                                                                                                       
+  - 热门榜单                                                                                                                                                                       
+                                                                                                                                                                                   
+  这种官方 ModelCache 就没我们手写 Repository + Redis 那么灵活。                                                                                                                   
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 3）不天然覆盖穿透 / 击穿 / 雪崩治理                                                                                                                                           
+                                                                                                                                                                                   
+  ModelCache 主要解决的是：                                                                                                                                                        
+                                                                                                                                                                                   
+  > 模型数据自动缓存                                                                                                                                                               
+                                                                                                                                                                                   
+  但像这些企业常见问题：                                                                                                                                                           
+                                                                                                                                                                                   
+  - 空值缓存                                                                                                                                                                       
+  - Bloom Filter                                                                                                                                                                   
+  - 逻辑过期                                                                                                                                                                       
+  - 互斥锁                                                                                                                                                                         
+  - 随机 TTL                                                                                                                                                                       
+                                                                                                                                                                                   
+  通常还是要你自己补策略。                                                                                                                                                         
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 4）缓存 key 规则受组件约束                                                                                                                                                    
+                                                                                                                                                                                   
+  官方文档里默认 key 规则类似：                                                                                                                                                    
+                                                                                                                                                                                   
+  mc:%s:m:%s:%s:%s                                                                                                                                                                 
+                                                                                                                                                                                   
+  也就是模型缓存 key 是组件内部风格。                                                                                                                                              
+  如果你企业项目特别强调统一 key 规范，手写会更可控。                                                                                                                              
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 五、企业项目里怎么选                                                                                                                                                           
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 适合用官方 ModelCache 的场景                                                                                                                                                  
+                                                                                                                                                                                   
+  如果你是：                                                                                                                                                                       
+                                                                                                                                                                                   
+  - 单条详情主键查询很多                                                                                                                                                           
+  - 想快速接入模型缓存                                                                                                                                                             
+  - 业务不复杂                                                                                                                                                                     
+  - 不想自己封装一堆 Redis 逻辑                                                                                                                                                    
+                                                                                                                                                                                   
+  那官方这套很好用。                                                                                                                                                               
+                                                                                                                                                                                   
+  例如：                                                                                                                                                                           
+                                                                                                                                                                                   
+  User::findFromCache($id);                                                                                                                                                        
+                                                                                                                                                                                   
+  这种非常省事。                                                                                                                                                                   
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 更适合手写 Repository 缓存的场景                                                                                                                                              
+                                                                                                                                                                                   
+  如果你是：                                                                                                                                                                       
+                                                                                                                                                                                   
+  - 需要列表缓存                                                                                                                                                                   
+  - 需要复杂 key 设计                                                                                                                                                              
+  - 需要防穿透/击穿/雪崩                                                                                                                                                           
+  - 需要 RedisBloom / Cuckoo Filter                                                                                                                                                
+  - 需要和业务强绑定的缓存策略                                                                                                                                                     
+  - 需要更强的分层控制                                                                                                                                                             
+                                                                                                                                                                                   
+  那更推荐手写。                                                                                                                                                                   
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 六、企业项目常见做法其实是“混用”                                                                                                                                               
+                                                                                                                                                                                   
+  很多项目不是二选一，而是：                                                                                                                                                       
+                                                                                                                                                                                   
+  ## 单条详情主键缓存                                                                                                                                                              
+                                                                                                                                                                                   
+  用 ModelCache                                                                                                                                                                    
+                                                                                                                                                                                   
+  例如：                                                                                                                                                                           
+                                                                                                                                                                                   
+  User::findFromCache($id);                                                                                                                                                        
+  Product::findFromCache($id);                                                                                                                                                     
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 列表 / 聚合 / 热点缓存                                                                                                                                                        
+                                                                                                                                                                                   
+  用手写缓存                                                                                                                                                                       
+                                                                                                                                                                                   
+  例如：                                                                                                                                                                           
+                                                                                                                                                                                   
+  - 首页列表                                                                                                                                                                       
+  - 搜索结果                                                                                                                                                                       
+  - 分类分页                                                                                                                                                                       
+  - 排行榜                                                                                                                                                                         
+  - 统计数据                                                                                                                                                                       
+                                                                                                                                                                                   
+  这样两边取长补短。                                                                                                                                                               
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 七、官方模型缓存怎么熟悉使用                                                                                                                                                   
+                                                                                                                                                                                   
+  如果你想熟悉这套，建议按这个顺序练：                                                                                                                                             
+                                                                                                                                                                                   
+  ## 第 1 步                                                                                                                                                                       
+                                                                                                                                                                                   
+  先练最小可用：                                                                                                                                                                   
+                                                                                                                                                                                   
+  User::findFromCache(1);                                                                                                                                                          
+                                                                                                                                                                                   
+  ## 第 2 步                                                                                                                                                                       
+                                                                                                                                                                                   
+  练批量：                                                                                                                                                                         
+                                                                                                                                                                                   
+  User::findManyFromCache([1, 2, 3]);                                                                                                                                              
+                                                                                                                                                                                   
+  ## 第 3 步                                                                                                                                                                       
+                                                                                                                                                                                   
+  练更新模型后缓存是否自动变化                                                                                                                                                     
+                                                                                                                                                                                   
+  $user = User::find(1);                                                                                                                                                           
+  $user->name = '新名字';                                                                                                                                                          
+  $user->save();                                                                                                                                                                   
+                                                                                                                                                                                   
+  然后再：                                                                                                                                                                         
+                                                                                                                                                                                   
+  User::findFromCache(1);                                                                                                                                                          
+                                                                                                                                                                                   
+  看缓存是否同步。                                                                                                                                                                 
+                                                                                                                                                                                   
+  ## 第 4 步                                                                                                                                                                       
+                                                                                                                                                                                   
+  练自定义 TTL：                                                                                                                                                                   
+                                                                                                                                                                                   
+  public function getCacheTTL(): ?int                                                                                                                                              
+  {                                                                                                                                                                                
+      return 600;                                                                                                                                                                  
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  官方文档也明确支持模型级 TTL 定制。                                                                                                                                              
+  来源：                                                                                                                                                                           
+  https://geekdaxue.co/read/hyperf-3.0-doc/docs-zh-cn-db-model-cache.md                                                                                                            
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 八、推荐理解方式                                                                                                                                                               
+                                                                                                                                                                                   
+  你可以把两种方案这样记：                                                                                                                                                         
+                                                                                                                                                                                   
+  ## 官方 ModelCache                                                                                                                                                               
+                                                                                                                                                                                   
+  > 适合“模型主键缓存”                                                                                                                                                             
+                                                                                                                                                                                   
+  ## 手写 Repository + Redis                                                                                                                                                       
+                                                                                                                                                                                   
+  > 适合“业务缓存策略”                                                                                                                                                             
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 九、一句话总结                                                                                                                                                                 
+                                                                                                                                                                                   
+  对，Hyperf 官网模型缓存主要就是通过 Cacheable + CacheableInterface + findFromCache() 这套做的。                                                                                  
+                                                                                                                                                                                   
+  但它更适合：                                                                                                                                                                     
+                                                                                                                                                                                   
+  - 单模型详情缓存                                                                                                                                                                 
+  - 主键查询缓存                                                                                                                                                                   
+                                                                                                                                                                                   
+  如果到了企业项目里：                                                                                                                                                             
+                                                                                                                                                                                   
+  - 详情缓存可以用它                                                                                                                                                               
+  - 列表缓存、复杂缓存、穿透击穿雪崩治理，通常还是要手写或混合使用                                                                                                                 
+                                                                                                                                                                                   
+  ———、
+
+
+
+# 事务
+
+# 一、怎么熟悉使用事务                                                                                                                                                           
+                                                                                                                                                                                   
+  先记一句最核心的话：                                                                                                                                                             
+                                                                                                                                                                                   
+  > 事务就是：把一组必须“要么都成功、要么都失败”的操作绑在一起执行。                                                                                                               
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 1. 先从最常见业务场景理解                                                                                                                                                     
+                                                                                                                                                                                   
+  最适合练事务的场景：                                                                                                                                                             
+                                                                                                                                                                                   
+  - 下单：创建订单 + 扣库存                                                                                                                                                        
+  - 转账：A 减钱 + B 加钱                                                                                                                                                          
+  - 退款：修改订单状态 + 写退款记录                                                                                                                                                
+  - 用户注册：写用户表 + 写积分表 + 写日志表                                                                                                                                       
+                                                                                                                                                                                   
+  如果不用事务，可能会出现：                                                                                                                                                       
+                                                                                                                                                                                   
+  - 订单创建成功了，但库存没扣                                                                                                                                                     
+  - A 钱扣了，B 没收到                                                                                                                                                             
+  - 用户创建了，但积分没发                                                                                                                                                         
+                                                                                                                                                                                   
+  这就是事务要解决的问题。                                                                                                                                                         
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 2. 先掌握最基本写法                                                                                                                                                           
+                                                                                                                                                                                   
+  在 Hyperf / Laravel 风格里最常见就是这两种：                                                                                                                                     
+                                                                                                                                                                                   
+  ### 写法1：闭包事务                                                                                                                                                              
+                                                                                                                                                                                   
+  use Hyperf\DbConnection\Db;                                                                                                                                                      
+                                                                                                                                                                                   
+  Db::transaction(function () {                                                                                                                                                    
+      // 1. 创建订单                                                                                                                                                               
+      // 2. 扣减库存                                                                                                                                                               
+      // 3. 写订单日志                                                                                                                                                             
+  });                                                                                                                                                                              
+                                                                                                                                                                                   
+  ### 写法2：手动开启事务                                                                                                                                                          
+                                                                                                                                                                                   
+  use Hyperf\DbConnection\Db;                                                                                                                                                      
+                                                                                                                                                                                   
+  Db::beginTransaction();                                                                                                                                                          
+                                                                                                                                                                                   
+  try {                                                                                                                                                                            
+      // 1. 创建订单                                                                                                                                                               
+      // 2. 扣减库存                                                                                                                                                               
+      // 3. 写订单日志                                                                                                                                                             
+                                                                                                                                                                                   
+      Db::commit();                                                                                                                                                                
+  } catch (\Throwable $e) {                                                                                                                                                        
+      Db::rollBack();                                                                                                                                                              
+      throw $e;                                                                                                                                                                    
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 3. 刻意练这 4 个 demo                                                                                                                                                         
+                                                                                                                                                                                   
+  你要真正熟，建议自己手写这几个：                                                                                                                                                 
+                                                                                                                                                                                   
+  ### demo 1：成功提交                                                                                                                                                             
+                                                                                                                                                                                   
+  - 创建订单                                                                                                                                                                       
+  - 扣库存                                                                                                                                                                         
+  - 最后 commit                                                                                                                                                                    
+                                                                                                                                                                                   
+  ### demo 2：中途报错自动回滚                                                                                                                                                     
+                                                                                                                                                                                   
+  - 创建订单成功                                                                                                                                                                   
+  - 扣库存时报错                                                                                                                                                                   
+  - 整个事务回滚                                                                                                                                                                   
+                                                                                                                                                                                   
+  ### demo 3：库存不足主动抛异常                                                                                                                                                   
+                                                                                                                                                                                   
+  if ($stock < $buyNum) {                                                                                                                                                          
+      throw new BusinessException(10001, '库存不足');                                                                                                                              
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ### demo 4：更新多张表                                                                                                                                                           
+                                                                                                                                                                                   
+  - orders                                                                                                                                                                         
+  - order_items                                                                                                                                                                    
+  - inventory                                                                                                                                                                      
+  - order_logs                                                                                                                                                                     
+                                                                                                                                                                                   
+  这个练完，你对事务就不陌生了。                                                                                                                                                   
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 4. 企业里什么时候必须加事务                                                                                                                                                   
+                                                                                                                                                                                   
+  一般这些操作要加事务：                                                                                                                                                           
+                                                                                                                                                                                   
+  - 多表写入                                                                                                                                                                       
+  - 同一业务的多次更新                                                                                                                                                             
+  - 扣库存、扣余额、积分变更                                                                                                                                                       
+  - 状态流转 + 日志记录                                                                                                                                                            
+  - 需要强一致性的核心链路                                                                                                                                                         
+                                                                                                                                                                                   
+  不一定要加事务的情况：                                                                                                                                                           
+                                                                                                                                                                                   
+  - 单表简单查询                                                                                                                                                                   
+  - 纯读操作                                                                                                                                                                       
+  - 非核心日志异步写入                                                                                                                                                             
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 二、怎么理解事务原理                                                                                                                                                           
+                                                                                                                                                                                   
+  ## 1. 事务本质                                                                                                                                                                   
+                                                                                                                                                                                   
+  事务本质就是数据库提供的一个“保护机制”：                                                                                                                                         
+                                                                                                                                                                                   
+  > 在事务里的 SQL，不是立刻永久生效，而是先作为一个整体执行，最后决定提交还是回滚。                                                                                               
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 2. 事务四大特性 ACID                                                                                                                                                          
+                                                                                                                                                                                   
+  这个一定要懂。                                                                                                                                                                   
+                                                                                                                                                                                   
+  ### A：Atomicity 原子性                                                                                                                                                          
+                                                                                                                                                                                   
+  要么全成功，要么全失败。                                                                                                                                                         
+                                                                                                                                                                                   
+  比如转账：                                                                                                                                                                       
+                                                                                                                                                                                   
+  - A -100                                                                                                                                                                         
+  - B +100                                                                                                                                                                         
+                                                                                                                                                                                   
+  不能只成功一半。                                                                                                                                                                 
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ### C：Consistency 一致性                                                                                                                                                        
+                                                                                                                                                                                   
+  事务前后，数据必须满足业务规则。                                                                                                                                                 
+                                                                                                                                                                                   
+  比如：                                                                                                                                                                           
+                                                                                                                                                                                   
+  - 总金额不能凭空多也不能少                                                                                                                                                       
+  - 库存不能扣成负数                                                                                                                                                               
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ### I：Isolation 隔离性                                                                                                                                                          
+                                                                                                                                                                                   
+  多个事务同时执行时，互相不能乱影响。                                                                                                                                             
+                                                                                                                                                                                   
+  比如两个人同时抢最后 1 件商品，不能都抢成功。                                                                                                                                    
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ### D：Durability 持久性                                                                                                                                                         
+                                                                                                                                                                                   
+  事务一旦提交，就必须永久保存。                                                                                                                                                   
+                                                                                                                                                                                   
+  即使数据库宕机，提交的数据也不能丢。                                                                                                                                             
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 3. 为什么能回滚                                                                                                                                                               
+                                                                                                                                                                                   
+  因为数据库会记录事务修改过程。                                                                                                                                                   
+                                                                                                                                                                                   
+  你可以简单理解成：                                                                                                                                                               
+                                                                                                                                                                                   
+  - 更新前，数据库先记一份“旧值”                                                                                                                                                   
+  - 如果失败，就按旧值恢复                                                                                                                                                         
+  - 如果成功提交，就正式生效                                                                                                                                                       
+                                                                                                                                                                                   
+  这背后常见依赖：                                                                                                                                                                 
+                                                                                                                                                                                   
+  - undo log：回滚用                                                                                                                                                               
+  - redo log：持久化用                                                                                                                                                             
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 4. 隔离级别要理解                                                                                                                                                             
+                                                                                                                                                                                   
+  事务最容易卡住人的点就是并发。                                                                                                                                                   
+                                                                                                                                                                                   
+  常见隔离级别：                                                                                                                                                                   
+                                                                                                                                                                                   
+  ### 1）Read Uncommitted                                                                                                                                                          
+                                                                                                                                                                                   
+  能读到别的事务未提交的数据                                                                                                                                                       
+  问题：脏读                                                                                                                                                                       
+                                                                                                                                                                                   
+  ### 2）Read Committed                                                                                                                                                            
+                                                                                                                                                                                   
+  只能读到已提交数据                                                                                                                                                               
+  解决脏读，但可能不可重复读                                                                                                                                                       
+                                                                                                                                                                                   
+  ### 3）Repeatable Read                                                                                                                                                           
+                                                                                                                                                                                   
+  同一个事务里多次读结果一致                                                                                                                                                       
+  MySQL InnoDB 默认这个                                                                                                                                                            
+                                                                                                                                                                                   
+  ### 4）Serializable                                                                                                                                                              
+                                                                                                                                                                                   
+  最严格，基本串行执行                                                                                                                                                             
+  性能最差                                                                                                                                                                         
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 5. 事务常见问题                                                                                                                                                               
+                                                                                                                                                                                   
+  ### 脏读                                                                                                                                                                         
+                                                                                                                                                                                   
+  读到了别人没提交的数据                                                                                                                                                           
+                                                                                                                                                                                   
+  ### 不可重复读                                                                                                                                                                   
+                                                                                                                                                                                   
+  同一个事务里，两次读同一条数据结果不同                                                                                                                                           
+                                                                                                                                                                                   
+  ### 幻读                                                                                                                                                                         
+                                                                                                                                                                                   
+  同一个事务里，两次查符合条件的“记录数”不一样                                                                                                                                     
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 三、你真正要怎么学会                                                                                                                                                           
+                                                                                                                                                                                   
+  ## 1. 不要只背概念，要自己打断点/做实验                                                                                                                                          
+                                                                                                                                                                                   
+  你可以自己做几个实验：                                                                                                                                                           
+                                                                                                                                                                                   
+  ### 实验1：不加事务                                                                                                                                                              
+                                                                                                                                                                                   
+  - 创建订单                                                                                                                                                                       
+  - 扣库存时报错                                                                                                                                                                   
+  - 看数据库是不是留下脏数据                                                                                                                                                       
+                                                                                                                                                                                   
+  ### 实验2：加事务                                                                                                                                                                
+                                                                                                                                                                                   
+  - 创建订单                                                                                                                                                                       
+  - 扣库存时报错                                                                                                                                                                   
+  - 看前面的订单是否回滚                                                                                                                                                           
+                                                                                                                                                                                   
+  ### 实验3：两个窗口同时扣库存                                                                                                                                                    
+                                                                                                                                                                                   
+  观察并发下会不会超卖。                                                                                                                                                           
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 2. 重点掌握这几个关键词                                                                                                                                                       
+                                                                                                                                                                                   
+  你以后面试和开发最常用的是：                                                                                                                                                     
+                                                                                                                                                                                   
+  - beginTransaction                                                                                                                                                               
+  - commit                                                                                                                                                                         
+  - rollBack                                                                                                                                                                       
+  - Db::transaction()                                                                                                                                                              
+  - 行锁                                                                                                                                                                           
+  - 乐观锁                                                                                                                                                                         
+  - 悲观锁                                                                                                                                                                         
+  - 隔离级别                                                                                                                                                                       
+  - undo log                                                                                                                                                                       
+  - redo log                                                                                                                                                                       
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 3. 用业务视角记事务                                                                                                                                                           
+                                                                                                                                                                                   
+  不要只从数据库背定义，直接记成：                                                                                                                                                 
+                                                                                                                                                                                   
+  - 防止半成功半失败                                                                                                                                                               
+  - 防止数据不一致                                                                                                                                                                 
+  - 保证核心业务链路完整                                                                                                                                                           
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 四、给你一个最小事务 demo                                                                                                                                                      
+                                                                                                                                                                                   
+  use Hyperf\DbConnection\Db;                                                                                                                                                      
+  use App\Exception\BusinessException;                                                                                                                                             
+                                                                                                                                                                                   
+  public function createOrder(): array                                                                                                                                             
+  {                                                                                                                                                                                
+      Db::transaction(function () {                                                                                                                                                
+          // 1. 创建订单                                                                                                                                                           
+          Db::table('orders')->insert([                                                                                                                                            
+              'order_no' => 'ORD' . date('YmdHis'),                                                                                                                                
+              'created_at' => date('Y-m-d H:i:s'),                                                                                                                                 
+          ]);                                                                                                                                                                      
+                                                                                                                                                                                   
+          // 2. 查询库存                                                                                                                                                           
+          $stock = Db::table('products')->where('id', 1)->value('stock');                                                                                                          
+                                                                                                                                                                                   
+          if ($stock <= 0) {                                                                                                                                                       
+              throw new BusinessException(10001, '库存不足');                                                                                                                      
+          }                                                                                                                                                                        
+                                                                                                                                                                                   
+          // 3. 扣库存                                                                                                                                                             
+          Db::table('products')->where('id', 1)->decrement('stock', 1);                                                                                                            
+      });                                                                                                                                                                          
+                                                                                                                                                                                   
+      return [                                                                                                                                                                     
+          'code' => 0,                                                                                                                                                             
+          'message' => '下单成功',                                                                                                                                                 
+          'data' => null,                                                                                                                                                          
+      ];                                                                                                                                                                           
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 五、最容易踩的坑                                                                                                                                                               
+                                                                                                                                                                                   
+  ## 1. 事务里不要写太多无关逻辑                                                                                                                                                   
+                                                                                                                                                                                   
+  比如：                                                                                                                                                                           
+                                                                                                                                                                                   
+  - 调第三方接口                                                                                                                                                                   
+  - 发短信                                                                                                                                                                         
+  - 发邮件                                                                                                                                                                         
+  - 长时间计算                                                                                                                                                                     
+                                                                                                                                                                                   
+  因为会让事务持锁太久。                                                                                                                                                           
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 2. 不是加了事务就不会超卖                                                                                                                                                     
+                                                                                                                                                                                   
+  事务解决的是“一组操作的一致性”，                                                                                                                                                 
+  但高并发扣库存还要结合：                                                                                                                                                         
+                                                                                                                                                                                   
+  - 行锁                                                                                                                                                                           
+  - 乐观锁                                                                                                                                                                         
+  - Redis 分布式锁                                                                                                                                                                 
+  - 库存条件更新                                                                                                                                                                   
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 3. 捕获异常后别忘了回滚                                                                                                                                                       
+                                                                                                                                                                                   
+  手动事务最怕漏 rollBack()。                                                                                                                                                      
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 六、最推荐你的学习路径                                                                                                                                                         
+                                                                                                                                                                                   
+  按这个顺序学最快：                                                                                                                                                               
+                                                                                                                                                                                   
+  1. 先理解事务解决什么问题                                                                                                                                                        
+  2. 写 2 个简单 demo：成功提交 / 报错回滚                                                                                                                                         
+  3. 学 ACID                                                                                                                                                                       
+  4. 学隔离级别                                                                                                                                                                    
+  5. 学并发扣库存                                                                                                                                                                  
+  6. 学事务 + 锁                                                                                                                                                                   
+  7. 学分布式事务                                                                                                                                                                  
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  如果你要，我下一步可以直接给你整理一份：                                                                                                                                         
+                                                                                                                                                                                   
+  1. Hyperf 事务完整 demo 文档                                                                                                                                                     
+  2. 事务 + 扣库存实战 demo                                                                                                                                                        
+  3. 事务原理 + 隔离级别 + 面试题文档
+
+1. 事务 + BusinessException 企业版 demo                                                                                                                                          
+  2. 事务 + Query Builder 写法版                                                                                                                                                   
+  3. 事务 + 转账场景 demo                                                                                                                                                          
+  4. 事务 + Swagger 接口文档版                                                                                                                                                     
+  5. 事务失效场景 demo（为什么有时你以为开了事务，其实没生效
+
+
+### demo 1：成功提交                                                                                                                                                             
+                                                                                                                                                                                   
+  - 创建订单                                                                                                                                                                       
+  - 扣库存                                                                                                                                                                         
+  - 最后 commit   
+流程:
+  - 创建订单                                                                                                                                                                       
+  - 扣库存                                                                                                                                                                         
+  - 成功后 commit                                                                                                                                                                  
+  - 失败时抛 BusinessException                                                                                                                                                     
+  - 捕获异常后 rollBack
+  核心逻辑是手动事务版：                                                                                                                                                           
+                                                                                                                                                                                   
+  Db::beginTransaction();                                                                                                                                                          
+                                                                                                                                                                                   
+  try {                                                                                                                                                                            
+      // 1. 锁库存                                                                                                                                                                 
+      // 2. 判断库存                                                                                                                                                               
+      // 3. 创建订单                                                                                                                                                               
+      // 4. 扣库存                                                                                                                                                                 
+      // 5. commit                                                                                                                                                                 
+      Db::commit();                                                                                                                                                                
+  } catch (...) {                                                                                                                                                                  
+      Db::rollBack();                                                                                                                                                              
+      throw ...;                                                                                                                                                                   
+  }
+
+<?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  namespace App\Service;                                                                                                                                                           
+                                                                                                                                                                                   
+  use App\Constants\TransactionErrorCode;                                                                                                                                          
+  use App\Exception\TransactionBusinessException;                                                                                                                                  
+  use App\Model\DemoTransactionOrder;                                                                                                                                              
+  use App\Model\Inventory;                                                                                                                                                         
+  use Hyperf\DbConnection\Db;                                                                                                                                                      
+  use Throwable;                                                                                                                                                                   
+                                                                                                                                                                                   
+  /**                                                                                                                                                                              
+   * 企业版事务 + BusinessException Demo                                                                                                                                           
+   *                                                                                                                                                                               
+   * 场景：                                                                                                                                                                        
+   * - 创建订单                                                                                                                                                                    
+   * - 扣库存                                                                                                                                                                      
+   * - 最后 commit                                                                                                                                                                 
+   */                                                                                                                                                                              
+  class TransactionBusinessDemoService                                                                                                                                             
+  {                                                                                                                                                                                
+      /**                                                                                                                                                                          
+       * 创建订单并扣库存                                                                                                                                                          
+       */                                                                                                                                                                          
+      public function createOrderAndDeductStock(int $skuId, int $quantity): array                                                                                                  
+      {                                                                                                                                                                            
+          // 1. 参数校验                                                                                                                                                           
+          if ($quantity <= 0) {                                                                                                                                                    
+              throw new TransactionBusinessException(TransactionErrorCode::ORDER_QUANTITY_INVALID);                                                                                
+          }                                                                                                                                                                        
+                                                                                                                                                                                   
+          // 2. 开启事务                                                                                                                                                           
+          Db::beginTransaction();                                                                                                                                                  
+                                                                                                                                                                                   
+          try {                                                                                                                                                                    
+              // 3. 查询库存，并加行锁，防止并发超卖                                                                                                                               
+              $inventory = Inventory::query()                                                                                                                                      
+                  ->where('sku_id', $skuId)                                                                                                                                        
+                  ->lockForUpdate()                                                                                                                                                
+                  ->first();                                                                                                                                                       
+                                                                                                                                                                                   
+              if (! $inventory) {                                                                                                                                                  
+                  throw new TransactionBusinessException(TransactionErrorCode::INVENTORY_NOT_FOUND);                                                                               
+              }                                                                                                                                                                    
+                                                                                                                                                                                   
+              // 4. 判断库存是否充足                                                                                                                                               
+              if ($inventory->stock < $quantity) {                                                                                                                                 
+                  throw new TransactionBusinessException(TransactionErrorCode::STOCK_NOT_ENOUGH);                                                                                  
+              }                                                                                                                                                                    
+                                                                                                                                                                                   
+              // 5. 创建订单                                                                                                                                                       
+              $order = DemoTransactionOrder::query()->create([                                                                                                                     
+                  'order_no' => 'BIZ' . date('YmdHis') . mt_rand(1000, 9999),                                                                                                      
+                  'sku_id' => $skuId,                                                                                                                                              
+                  'quantity' => $quantity,                                                                                                                                         
+                  'status' => 1,                                                                                                                                                   
+                  'remark' => '事务 + BusinessException 企业版 Demo',                                                                                                              
+              ]);                                                                                                                                                                  
+                                                                                                                                                                                   
+              if (! $order) {                                                                                                                                                      
+                  throw new TransactionBusinessException(TransactionErrorCode::ORDER_CREATE_FAILED);                                                                               
+              }                                                                                                                                                                    
+                                                                                                                                                                                   
+              // 6. 扣减库存                                                                                                                                                       
+              $inventory->stock -= $quantity;                                                                                                                                      
+              $inventory->save();                                                                                                                                                  
+                                                                                                                                                                                   
+              // 7. 最后提交事务                                                                                                                                                   
+              Db::commit();                                                                                                                                                        
+                                                                                                                                                                                   
+              return [                                                                                                                                                             
+                  'code' => TransactionErrorCode::SUCCESS,                                                                                                                         
+                  'message' => '下单成功',                                                                                                                                         
+                  'data' => [                                                                                                                                                      
+                      'order' => $order->toArray(),                                                                                                                                
+                      'inventory' => [                                                                                                                                             
+                          'sku_id' => $skuId,                                                                                                                                      
+                          'left_stock' => $inventory->stock,                                                                                                                       
+                      ],                                                                                                                                                           
+                  ],                                                                                                                                                               
+              ];                                                                                                                                                                   
+          } catch (TransactionBusinessException $exception) {                                                                                                                      
+              // 业务异常：回滚后继续抛出                                                                                                                                          
+              Db::rollBack();                                                                                                                                                      
+              throw $exception;                                                                                                                                                    
+          } catch (Throwable $throwable) {                                                                                                                                         
+              // 系统异常：回滚后包装成业务异常抛出                                                                                                                                
+              Db::rollBack();                                                                                                                                                      
+              throw new TransactionBusinessException(                                                                                                                              
+                  TransactionErrorCode::ORDER_CREATE_FAILED,                                                                                                                       
+                  '事务执行失败：' . $throwable->getMessage(),                                                                                                                     
+                  $throwable                                                                                                                                                       
+              );                                                                                                                                                                   
+          }                                                                                                                                                                        
+      }                                                                                                                                                                            
+  }
+
+
+<?php
+
+declare(strict_types=1);
+
+namespace App\Controller;
+
+use App\Service\TransactionBusinessDemoService;
+use Hyperf\HttpServer\Annotation\Controller;
+use Hyperf\HttpServer\Annotation\PostMapping;
+
+#[Controller(prefix: 'transaction')]
+class TransactionBusinessDemoController
+{
+    public function __construct(
+        protected TransactionBusinessDemoService $service
+    )
+    {
+    }
+
+    /**
+     * 创建订单并扣库存
+     */
+    #[PostMapping('submit')]
+    public function submit(): array
+    {
+        return $this->service->createOrderAndDeductStock(1001, 1);
+    }
+}
+
+<?php
+
+declare(strict_types=1);
+
+namespace App\Constants;
+
+use Hyperf\Constants\AbstractConstants;
+use Hyperf\Constants\Annotation\Constants;
+
+/**
+ * 事务业务错误码常量类
+ *
+ * 作用：
+ * - 统一管理事务场景下的业务错误码
+ * - 统一维护错误码对应的默认提示信息
+ * - 避免在业务代码中到处写魔法数字
+ *
+ * 使用方式：
+ * TransactionErrorCode::STOCK_NOT_ENOUGH
+ * TransactionErrorCode::getMessage(TransactionErrorCode::STOCK_NOT_ENOUGH)
+ */
+#[Constants]
+class TransactionErrorCode extends AbstractConstants
+{
+    /**
+     * @Message("成功")
+     */
+    public const SUCCESS = 0;
+
+    /**
+     * @Message("服务器内部错误")
+     */
+    public const SERVER_ERROR = 500;
+
+    /**
+     * @Message("库存记录不存在")
+     */
+    public const INVENTORY_NOT_FOUND = 20001;
+
+    /**
+     * @Message("库存不足")
+     */
+    public const STOCK_NOT_ENOUGH = 20002;
+
+    /**
+     * @Message("购买数量必须大于 0")
+     */
+    public const ORDER_QUANTITY_INVALID = 20003;
+
+    /**
+     * @Message("订单创建失败")
+     */
+    public const ORDER_CREATE_FAILED = 20004;
+}
+
+
+<?php
+
+declare(strict_types=1);
+
+namespace App\Exception;
+
+use App\Constants\TransactionErrorCode;
+use Throwable;
+
+/**
+ * 事务业务异常
+ */
+class TransactionBusinessException extends BusinessException
+{
+    public function __construct(int $code = 0, ?string $message = null, ?Throwable $previous = null)
+    {
+        if ($message === null) {
+            $message = TransactionErrorCode::getMessage($code);
+        }
+
+        parent::__construct($code, $message, $previous);
+    }
+}
+
+异常捕获方法二
+<?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  namespace App\Exception;                                                                                                                                                         
+                                                                                                                                                                                   
+  use App\Constants\TransactionErrorCode;                                                                                                                                          
+  use Hyperf\Server\Exception\ServerException;                                                                                                                                     
+  use Throwable;                                                                                                                                                                   
+                                                                                                                                                                                   
+  /**                                                                                                                                                                              
+   * 事务业务异常                                                                                                                                                                  
+   */                                                                                                                                                                              
+  class TransactionBusinessException extends ServerException                                                                                                                       
+  {                                                                                                                                                                                
+      public function __construct(int $code = 0, ?string $message = null, ?Throwable $previous = null)                                                                             
+      {                                                                                                                                                                            
+          if ($message === null) {                                                                                                                                                 
+              $message = TransactionErrorCode::getMessage($code);                                                                                                                  
+          }                                                                                                                                                                        
+                                                                                                                                                                                   
+          parent::__construct($message, $code, $previous);                                                                                                                         
+      }                                                                                                                                                                            
+  }
+
+
+：修改 BusinessExceptionHandler，让它同时处理 TransactionBusinessException                                                                                               
+                                                                                                                                                                                   
+  比如：                                                                                                                                                                           
+                                                                                                                                                                                   
+  ## app/Exception/Handler/BusinessExceptionHandler.php                                                                                                                            
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  namespace App\Exception\Handler;                                                                                                                                                 
+                                                                                                                                                                                   
+  use App\Exception\BusinessException;                                                                                                                                             
+  use App\Exception\TransactionBusinessException;                                                                                                                                  
+  use Hyperf\ExceptionHandler\ExceptionHandler;                                                                                                                                    
+  use Hyperf\HttpServer\Contract\ResponseInterface as HttpResponse;                                                                                                                
+  use Psr\Http\Message\ResponseInterface;                                                                                                                                          
+  use Throwable;                                                                                                                                                                   
+                                                                                                                                                                                   
+  class BusinessExceptionHandler extends ExceptionHandler                                                                                                                          
+  {                                                                                                                                                                                
+      public function __construct(                                                                                                                                                 
+          protected HttpResponse $response                                                                                                                                         
+      ) {                                                                                                                                                                          
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      public function handle(Throwable $throwable, ResponseInterface $response)                                                                                                    
+      {                                                                                                                                                                            
+          $this->stopPropagation();                                                                                                                                                
+                                                                                                                                                                                   
+          return $this->response->json([                                                                                                                                           
+              'code' => $throwable->getCode(),                                                                                                                                     
+              'message' => $throwable->getMessage(),                                                                                                                               
+              'data' => null,                                                                                                                                                      
+          ]);                                                                                                                                                                      
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      public function isValid(Throwable $throwable): bool                                                                                                                          
+      {                                                                                                                                                                            
+          return $throwable instanceof BusinessException                                                                                                                           
+              || $throwable instanceof TransactionBusinessException;                                                                                                               
+      }                                                                                                                                                                            
+  }
+
+
+
+
+# 1）库存表 inventories                                                                                                                                                          
+                                                                                                                                                                                   
+  DROP TABLE IF EXISTS `inventories`;                                                                                                                                              
+                                                                                                                                                                                   
+  CREATE TABLE `inventories` (                                                                                                                                                     
+    `id` bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '主键ID',                                                                                                                 
+    `sku_id` bigint unsigned NOT NULL COMMENT '商品SKU ID',                                                                                                                        
+    `stock` int NOT NULL DEFAULT 0 COMMENT '库存数量',                                                                                                                             
+    `created_at` datetime DEFAULT NULL COMMENT '创建时间',                                                                                                                         
+    `updated_at` datetime DEFAULT NULL COMMENT '更新时间',                                                                                                                         
+    PRIMARY KEY (`id`),                                                                                                                                                            
+    UNIQUE KEY `uk_sku_id` (`sku_id`)                                                                                                                                              
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='库存表';                                                                                                                        
+                                                                                                                                                                                   
+  测试数据：                                                                                                                                                                       
+                                                                                                                                                                                   
+  INSERT INTO `inventories` (`sku_id`, `stock`, `created_at`, `updated_at`)                                                                                                        
+  VALUES                                                                                                                                                                           
+  (1001, 10, NOW(), NOW()),                                                                                                                                                        
+  (1002, 5, NOW(), NOW());                                                                                                                                                         
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 2）订单表 demo_transaction_orders                                                                                                                                              
+                                                                                                                                                                                   
+  DROP TABLE IF EXISTS `demo_transaction_orders`;                                                                                                                                  
+                                                                                                                                                                                   
+  CREATE TABLE `demo_transaction_orders` (                                                                                                                                         
+    `id` bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '主键ID',                                                                                                                 
+    `order_no` varchar(64) NOT NULL COMMENT '订单号',                                                                                                                              
+    `sku_id` bigint unsigned NOT NULL COMMENT '商品SKU ID',                                                                                                                        
+    `quantity` int unsigned NOT NULL DEFAULT 1 COMMENT '购买数量',                                                                                                                 
+    `status` tinyint NOT NULL DEFAULT 1 COMMENT '订单状态：1成功 0失败',                                                                                                           
+    `remark` varchar(255) DEFAULT NULL COMMENT '备注',                                                                                                                             
+    `created_at` datetime DEFAULT NULL COMMENT '创建时间',                                                                                                                         
+    `updated_at` datetime DEFAULT NULL COMMENT '更新时间',                                                                                                                         
+    PRIMARY KEY (`id`),                                                                                                                                                            
+    UNIQUE KEY `uk_order_no` (`order_no`),                                                                                                                                         
+    KEY `idx_sku_id` (`sku_id`)                                                                                                                                                    
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='事务订单表示例';
+
+
+<?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  namespace App\Model;                                                                                                                                                             
+                                                                                                                                                                                   
+  use Hyperf\DbConnection\Model\Model;                                                                                                                                             
+                                                                                                                                                                                   
+  /**                                                                                                                                                                              
+   * 库存模型                                                                                                                                                                      
+   *                                                                                                                                                                               
+   * 对应数据表：inventories                                                                                                                                                       
+   *                                                                                                                                                                               
+   * @property int $id 主键ID                                                                                                                                                      
+   * @property int $sku_id 商品 SKU ID                                                                                                                                             
+   * @property int $stock 库存数量                                                                                                                                                 
+   * @property string|null $created_at 创建时间                                                                                                                                    
+   * @property string|null $updated_at 更新时间                                                                                                                                    
+   */                                                                                                                                                                              
+  class Inventory extends Model                                                                                                                                                    
+  {                                                                                                                                                                                
+      /**                                                                                                                                                                          
+       * 对应表名                                                                                                                                                                  
+       */                                                                                                                                                                          
+      protected ?string $table = 'inventories';                                                                                                                                    
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 允许批量赋值的字段                                                                                                                                                        
+       */                                                                                                                                                                          
+      protected array $fillable = [                                                                                                                                                
+          'sku_id',                                                                                                                                                                
+          'stock',                                                                                                                                                                 
+          'created_at',                                                                                                                                                            
+          'updated_at',                                                                                                                                                            
+      ];                                                                                                                                                                           
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 属性类型转换                                                                                                                                                              
+       */                                                                                                                                                                          
+      protected array $casts = [                                                                                                                                                   
+          'id' => 'integer',                                                                                                                                                       
+          'sku_id' => 'integer',                                                                                                                                                   
+          'stock' => 'integer',                                                                                                                                                    
+      ];                                                                                                                                                                           
+  }
+
+<?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  namespace App\Model;                                                                                                                                                             
+                                                                                                                                                                                   
+  use Hyperf\DbConnection\Model\Model;                                                                                                                                             
+                                                                                                                                                                                   
+  /**                                                                                                                                                                              
+   * 事务订单模型                                                                                                                                                                  
+   *                                                                                                                                                                               
+   * 对应数据表：demo_transaction_orders                                                                                                                                           
+   *                                                                                                                                                                               
+   * @property int $id 主键ID                                                                                                                                                      
+   * @property string $order_no 订单号                                                                                                                                             
+   * @property int $sku_id 商品 SKU ID                                                                                                                                             
+   * @property int $quantity 购买数量                                                                                                                                              
+   * @property int $status 订单状态                                                                                                                                                
+   * @property string|null $remark 备注                                                                                                                                            
+   * @property string|null $created_at 创建时间                                                                                                                                    
+   * @property string|null $updated_at 更新时间                                                                                                                                    
+   */                                                                                                                                                                              
+  class DemoTransactionOrder extends Model                                                                                                                                         
+  {                                                                                                                                                                                
+      /**                                                                                                                                                                          
+       * 对应表名                                                                                                                                                                  
+       */                                                                                                                                                                          
+      protected ?string $table = 'demo_transaction_orders';                                                                                                                        
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 允许批量赋值的字段                                                                                                                                                        
+       */                                                                                                                                                                          
+      protected array $fillable = [                                                                                                                                                
+          'order_no',                                                                                                                                                              
+          'sku_id',                                                                                                                                                                
+          'quantity',                                                                                                                                                              
+          'status',                                                                                                                                                                
+          'remark',                                                                                                                                                                
+          'created_at',                                                                                                                                                            
+          'updated_at',                                                                                                                                                            
+      ];                                                                                                                                                                           
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 属性类型转换                                                                                                                                                              
+       */                                                                                                                                                                          
+      protected array $casts = [                                                                                                                                                   
+          'id' => 'integer',                                                                                                                                                       
+          'sku_id' => 'integer',                                                                                                                                                   
+          'quantity' => 'integer',                                                                                                                                                 
+          'status' => 'integer',                                                                                                                                                   
+      ];                                                                                                                                                                           
+  }
+                                                                                                                                                                                   
+  ### demo 2：中途报错自动回滚                                                                                                                                                     
+                                                                                                                                                                                   
+  - 创建订单成功                                                                                                                                                                   
+  - 扣库存时报错                                                                                                                                                                   
+  - 整个事务回滚                                                                                                                                                                   
+                                                                                                                                                                                   
+  ### demo 3：库存不足主动抛异常                                                                                                                                                   
+                                                                                                                                                                                   
+  if ($stock < $buyNum) {                                                                                                                                                          
+      throw new BusinessException(10001, '库存不足');                                                                                                                              
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ### demo 4：更新多张表                                                                                                                                                           
+                                                                                                                                                                                   
+  - orders                                                                                                                                                                         
+  - order_items                                                                                                                                                                    
+  - inventory                                                                                                                                                                      
+  - order_logs
