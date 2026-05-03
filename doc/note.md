@@ -13548,8 +13548,292 @@ class TransactionBusinessException extends BusinessException
                                                                                                                                                                                    
   - 创建订单成功                                                                                                                                                                   
   - 扣库存时报错                                                                                                                                                                   
+  - 整个事务回滚
+
+ 流程
+  - 创建订单成功                                                                                                                                                                   
+  - 扣库存时报错                                                                                                                                                                   
   - 整个事务回滚                                                                                                                                                                   
+  - 最终数据库里 不会留下订单                                                                                                                                                      
+  - 库存也 不会变化
+       
+# 一、核心原理                                                                                                                                                                   
                                                                                                                                                                                    
+  只要代码在：                                                                                                                                                                     
+                                                                                                                                                                                   
+  Db::transaction(function () {                                                                                                                                                    
+      // ...                                                                                                                                                                       
+  });                                                                                                                                                                              
+                                                                                                                                                                                   
+  这个事务闭包里抛出了异常：                                                                                                                                                       
+                                                                                                                                                                                   
+  throw new \RuntimeException('模拟扣库存失败');                                                                                                                                   
+                                                                                                                                                                                   
+  Hy perf / 数据库就会自动：                                                                                                                                                       
+                                                                                                                                                                                   
+  - 回滚前面已执行的 SQL                                                                                                                                                           
+  - 不提交事务                                                                                                                                                                     
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 二、Demo 代码                                                                                                                                                                  
+                                                                                                                                                                                   
+  ## app/Service/TransactionRollbackDemoService.php                                                                                                                                
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  namespace App\Service;                                                                                                                                                           
+                                                                                                                                                                                   
+  use App\Model\DemoTransactionOrder;                                                                                                                                              
+  use App\Model\Inventory;                                                                                                                                                         
+  use Hyperf\DbConnection\Db;                                                                                                                                                      
+  use RuntimeException;                                                                                                                                                            
+                                                                                                                                                                                   
+  /**                                                                                                                                                                              
+   * 事务自动回滚 Demo                                                                                                                                                             
+   */                                                                                                                                                                              
+  class TransactionRollbackDemoService                                                                                                                                             
+  {                                                                                                                                                                                
+      /**                                                                                                                                                                          
+       * 中途报错自动回滚                                                                                                                                                          
+       *                                                                                                                                                                           
+       * 执行流程：                                                                                                                                                                
+       * 1. 先创建订单                                                                                                                                                             
+       * 2. 再查询库存                                                                                                                                                             
+       * 3. 模拟扣库存时报错                                                                                                                                                       
+       * 4. 整个事务自动回滚                                                                                                                                                       
+       */                                                                                                                                                                          
+      public function createOrderAndRollback(int $skuId, int $quantity): array                                                                                                     
+      {                                                                                                                                                                            
+          Db::transaction(function () use ($skuId, $quantity) {                                                                                                                    
+              // 1. 创建订单                                                                                                                                                       
+              DemoTransactionOrder::query()->create([                                                                                                                              
+                  'order_no' => 'RB' . date('YmdHis') . mt_rand(1000, 9999),                                                                                                       
+                  'sku_id' => $skuId,                                                                                                                                              
+                  'quantity' => $quantity,                                                                                                                                         
+                  'status' => 1,                                                                                                                                                   
+                  'remark' => '事务中途报错自动回滚 Demo',                                                                                                                         
+              ]);                                                                                                                                                                  
+                                                                                                                                                                                   
+              // 2. 查询库存                                                                                                                                                       
+              $inventory = Inventory::query()                                                                                                                                      
+                  ->where('sku_id', $skuId)                                                                                                                                        
+                  ->lockForUpdate()                                                                                                                                                
+                  ->first();                                                                                                                                                       
+                                                                                                                                                                                   
+              if (! $inventory) {                                                                                                                                                  
+                  throw new RuntimeException('库存记录不存在');                                                                                                                    
+              }                                                                                                                                                                    
+                                                                                                                                                                                   
+              // 3. 模拟扣库存时报错                                                                                                                                               
+              throw new RuntimeException('模拟异常：扣库存失败，触发事务自动回滚');                                                                                                
+                                                                                                                                                                                   
+              // 4. 这段代码不会执行到                                                                                                                                             
+              $inventory->stock -= $quantity;                                                                                                                                      
+              $inventory->save();                                                                                                                                                  
+          });                                                                                                                                                                      
+                                                                                                                                                                                   
+          return [                                                                                                                                                                 
+              'code' => 0,                                                                                                                                                         
+              'message' => '这行一般不会执行到',                                                                                                                                   
+              'data' => null,                                                                                                                                                      
+          ];                                                                                                                                                                       
+      }                                                                                                                                                                            
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 三、Controller Demo                                                                                                                                                            
+                                                                                                                                                                                   
+  ## app/Controller/TransactionRollbackDemoController.php                                                                                                                          
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  namespace App\Controller;                                                                                                                                                        
+                                                                                                                                                                                   
+  use App\Service\TransactionRollbackDemoService;                                                                                                                                  
+  use Hyperf\HttpServer\Annotation\Controller;                                                                                                                                     
+  use Hyperf\HttpServer\Annotation\PostMapping;                                                                                                                                    
+                                                                                                                                                                                   
+  #[Controller(prefix: 'transaction-rollback')]                                                                                                                                    
+  class TransactionRollbackDemoController                                                                                                                                          
+  {                                                                                                                                                                                
+      public function __construct(                                                                                                                                                 
+          protected TransactionRollbackDemoService $service                                                                                                                        
+      ) {                                                                                                                                                                          
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 中途报错自动回滚 Demo                                                                                                                                                     
+       */                                                                                                                                                                          
+      #[PostMapping('test')]                                                                                                                                                       
+      public function test(): array                                                                                                                                                
+      {                                                                                                                                                                            
+          return $this->service->createOrderAndRollback(1001, 1);                                                                                                                  
+      }                                                                                                                                                                            
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 四、你需要的表                                                                                                                                                                 
+                                                                                                                                                                                   
+  还是这两张表：                                                                                                                                                                   
+                                                                                                                                                                                   
+  - inventories                                                                                                                                                                    
+  - demo_transaction_orders                                                                                                                                                        
+                                                                                                                                                                                   
+  比如库存数据：                                                                                                                                                                   
+                                                                                                                                                                                   
+  INSERT INTO `inventories` (`sku_id`, `stock`, `created_at`, `updated_at`)                                                                                                        
+  VALUES (1001, 10, NOW(), NOW());                                                                                                                                                 
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 五、请求测试                                                                                                                                                                   
+                                                                                                                                                                                   
+  接口：                                                                                                                                                                           
+                                                                                                                                                                                   
+  POST /transaction-rollback/test                                                                                                                                                  
+                                                                                                                                                                                   
+  比如：                                                                                                                                                                           
+                                                                                                                                                                                   
+  curl -X POST http://127.0.0.1:9501/transaction-rollback/test                                                                                                                     
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 六、执行结果会是什么                                                                                                                                                           
+                                                                                                                                                                                   
+  事务内执行顺序：                                                                                                                                                                 
+                                                                                                                                                                                   
+  1. 创建订单                                                                                                                                                                      
+  2. 查库存                                                                                                                                                                        
+  3. 抛异常                                                                                                                                                                        
+  4. 自动回滚                                                                                                                                                                      
+                                                                                                                                                                                   
+  所以最终结果：                                                                                                                                                                   
+                                                                                                                                                                                   
+  ## 1）订单不会保留                                                                                                                                                               
+                                                                                                                                                                                   
+  虽然 create() 执行了，但因为还没提交，后面异常触发回滚，订单会被撤销。                                                                                                           
+                                                                                                                                                                                   
+  ## 2）库存不会变化                                                                                                                                                               
+                                                                                                                                                                                   
+  因为扣库存代码本来就没执行成功，而且整个事务也回滚了。                                                                                                                           
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 七、你怎么验证“真的回滚了”                                                                                                                                                     
+                                                                                                                                                                                   
+  ## 验证订单表                                                                                                                                                                    
+                                                                                                                                                                                   
+  执行接口前先查：                                                                                                                                                                 
+                                                                                                                                                                                   
+  SELECT * FROM demo_transaction_orders ORDER BY id DESC;                                                                                                                          
+                                                                                                                                                                                   
+  记住数量。                                                                                                                                                                       
+                                                                                                                                                                                   
+  调用接口后再查一次：                                                                                                                                                             
+                                                                                                                                                                                   
+  SELECT * FROM demo_transaction_orders ORDER BY id DESC;                                                                                                                          
+                                                                                                                                                                                   
+  你会发现：                                                                                                                                                                       
+                                                                                                                                                                                   
+  - 没有新增订单                                                                                                                                                                   
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 验证库存表                                                                                                                                                                    
+                                                                                                                                                                                   
+  SELECT * FROM inventories WHERE sku_id = 1001;                                                                                                                                   
+                                                                                                                                                                                   
+  你会发现：                                                                                                                                                                       
+                                                                                                                                                                                   
+  - stock 还是原来的值                                                                                                                                                             
+  - 比如还是 10                                                                                                                                                                    
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 八、为什么会自动回滚                                                                                                                                                           
+                                                                                                                                                                                   
+  因为你用的是：                                                                                                                                                                   
+                                                                                                                                                                                   
+  Db::transaction(function () {                                                                                                                                                    
+      ...                                                                                                                                                                          
+  });                                                                                                                                                                              
+                                                                                                                                                                                   
+  这个写法的机制就是：                                                                                                                                                             
+                                                                                                                                                                                   
+  - 闭包正常执行完 -> 自动 commit                                                                                                                                                  
+  - 闭包里抛异常 -> 自动 rollBack                                                                                                                                                  
+                                                                                                                                                                                   
+  所以它非常适合这种 demo。                                                                                                                                                        
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 九、如果你想更直观看出“订单先成功了”                                                                                                                                           
+                                                                                                                                                                                   
+  可以在事务里面临时打印日志：                                                                                                                                                     
+                                                                                                                                                                                   
+  logger()->info('订单已创建，准备扣库存');                                                                                                                                        
+  throw new RuntimeException('模拟扣库存失败');                                                                                                                                    
+                                                                                                                                                                                   
+  这样你能从日志看到：                                                                                                                                                             
+                                                                                                                                                                                   
+  - 订单创建代码确实执行过                                                                                                                                                         
+  - 但最终数据库里还是没有这条订单                                                                                                                                                 
+                                                                                                                                                                                   
+  这就能更直观理解：                                                                                                                                                               
+                                                                                                                                                                                   
+  > “执行过” 不等于 “已提交”                                                                                                                                                       
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 十、企业项目里这个 demo 有什么意义                                                                                                                                             
+                                                                                                                                                                                   
+  这个 demo 是学习事务最关键的一步，它让你理解：                                                                                                                                   
+                                                                                                                                                                                   
+  - 而是看事务最后有没有 commit                                                                                                                                                    
+  - 只要中途抛异常，即使前面 SQL 执行过，也会被回滚                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  如果你不想用 RuntimeException，也可以换成你前面的业务异常：                                                                                                                      
+                                                                                                                                                                                   
+  throw new BusinessException(TransactionErrorCode::STOCK_NOT_ENOUGH);                                                                                                             
+                                                                                                                                                                                   
+  效果一样：                                                                                                                                                                       
+                                                                                                                                                                                   
+  - 抛异常                                                                                                                                                                         
+  - 自动回滚                                                                                                                                                                       
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 十二、最小版代码                                                                                                                                                               
+                                                                                                                                                                                   
+  如果你只想看最短版本，就是这个：                                                                                                                                                 
+                                                                                                                                                                                   
+  Db::transaction(function () {                                                                                                                                                    
+      DemoTransactionOrder::query()->create([                                                                                                                                      
+          'order_no' => 'RB' . time(),                                                                                                                                             
+          'sku_id' => 1001,                                                                                                                                                        
+          'quantity' => 1,                                                                                                                                                         
+          'status' => 1,                                                                                                                                                           
+          'remark' => '回滚测试',                                                                                                                                                  
+      ]);                                                                                                                                                                          
+                                                                                                                                                                                   
+      throw new RuntimeException('模拟失败');                                                                                                                                      
+  });                                                                                                                                                                              
+                                                                                                                                                                                   
+  效果：                                                                                                                                                                           
+                                                                                                                                                                                   
+  - 订单不会真的落库
+
+
+
   ### demo 3：库存不足主动抛异常                                                                                                                                                   
                                                                                                                                                                                    
   if ($stock < $buyNum) {                                                                                                                                                          
