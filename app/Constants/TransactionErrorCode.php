@@ -51,4 +51,9 @@ class TransactionErrorCode extends AbstractConstants
      * @Message("订单创建失败")
      */
     public const ORDER_CREATE_FAILED = 20004;
+
+    /**
+     * @Message("重复提交")
+     */
+    public const ORDER_REPEAT_SUBMIT=20005;
 }

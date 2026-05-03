@@ -15006,3 +15006,612 @@ class OrderTransactionDemoService
       }                                                                                                                                                                            
   }
 
+
+
+# 2. 幂等 + 事务 + 条件扣库存完整 demo                                                                                                                                           
+                                                                                                                                                                                   
+  这个更完整，适合真实下单接口。                                                                                                                                                   
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## app/Service/OrderSubmitService.php                                                                                                                                            
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  namespace App\Service;                                                                                                                                                           
+                                                                                                                                                                                   
+  use App\Constants\TransactionErrorCode;                                                                                                                                          
+  use App\Exception\BusinessException;                                                                                                                                             
+  use App\Model\DemoOrder;                                                                                                                                                         
+  use App\Model\DemoOrderItem;                                                                                                                                                     
+  use App\Model\Inventory;                                                                                                                                                         
+  use App\Model\OrderLog;                                                                                                                                                          
+  use Hyperf\DbConnection\Db;                                                                                                                                                      
+                                                                                                                                                                                   
+  class OrderSubmitService                                                                                                                                                         
+  {                                                                                                                                                                                
+      public function __construct(                                                                                                                                                 
+          protected RedisService $redisService                                                                                                                                     
+      ) {                                                                                                                                                                          
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 幂等 + 事务 + 条件扣库存                                                                                                                                                  
+       */                                                                                                                                                                          
+      public function submit(int $userId, int $skuId, int $quantity, string $requestId): array                                                                                     
+      {                                                                                                                                                                            
+          if ($quantity <= 0) {                                                                                                                                                    
+              throw new BusinessException(TransactionErrorCode::ORDER_QUANTITY_INVALID);                                                                                           
+          }                                                                                                                                                                        
+                                                                                                                                                                                   
+          // 1. 幂等 key，防止重复提交                                                                                                                                             
+          $idempotentKey = "order:submit:{$userId}:{$requestId}";                                                                                                                  
+          $locked = $this->redisService->getClient()->set($idempotentKey, 1, ['nx', 'ex' => 10]);                                                                                  
+                                                                                                                                                                                   
+          if (! $locked) {                                                                                                                                                         
+              throw new BusinessException(TransactionErrorCode::ORDER_REPEAT_SUBMIT);                                                                                              
+          }                                                                                                                                                                        
+                                                                                                                                                                                   
+          try {                                                                                                                                                                    
+              return Db::transaction(function () use ($userId, $skuId, $quantity) {                                                                                                
+                  $inventory = Inventory::query()                                                                                                                                  
+                      ->where('sku_id', $skuId)                                                                                                                                    
+                      ->first();                                                                                                                                                   
+                                                                                                                                                                                   
+                  if (! $inventory) {                                                                                                                                              
+                      throw new BusinessException(TransactionErrorCode::INVENTORY_NOT_FOUND);                                                                                      
+                  }                                                                                                                                                                
+                                                                                                                                                                                   
+                  $price = 199.00;                                                                                                                                                 
+                  $amount = bcmul((string) $price, (string) $quantity, 2);                                                                                                         
+                                                                                                                                                                                   
+                  // 2. 创建订单主表                                                                                                                                               
+                  $order = DemoOrder::query()->create([                                                                                                                            
+                      'order_no' => 'ORD' . date('YmdHis') . mt_rand(1000, 9999),                                                                                                  
+                      'user_id' => $userId,                                                                                                                                        
+                      'total_amount' => $amount,                                                                                                                                   
+                      'status' => 1,                                                                                                                                               
+                      'remark' => '幂等 + 事务 + 条件扣库存 Demo',                                                                                                                 
+                  ]);                                                                                                                                                              
+                                                                                                                                                                                   
+                  // 3. 创建订单明细                                                                                                                                               
+                  DemoOrderItem::query()->create([                                                                                                                                 
+                      'order_id' => $order->id,                                                                                                                                    
+                      'sku_id' => $skuId,                                                                                                                                          
+                      'product_name' => '测试商品A',                                                                                                                               
+                      'price' => $price,                                                                                                                                           
+                      'quantity' => $quantity,                                                                                                                                     
+                      'amount' => $amount,                                                                                                                                         
+                  ]);                                                                                                                                                              
+                                                                                                                                                                                   
+                  // 4. 条件扣库存                                                                                                                                                 
+                  $affected = Inventory::query()                                                                                                                                   
+                      ->where('sku_id', $skuId)                                                                                                                                    
+                      ->where('stock', '>=', $quantity)                                                                                                                            
+                      ->decrement('stock', $quantity);                                                                                                                             
+                                                                                                                                                                                   
+                  if ($affected === 0) {                                                                                                                                           
+                      throw new BusinessException(TransactionErrorCode::STOCK_NOT_ENOUGH);                                                                                         
+                  }                                                                                                                                                                
+                                                                                                                                                                                   
+                  // 5. 写日志                                                                                                                                                     
+                  OrderLog::query()->create([                                                                                                                                      
+                      'order_id' => $order->id,                                                                                                                                    
+                      'content' => '订单创建成功，库存扣减成功，幂等校验通过',                                                                                                     
+                  ]);                                                                                                                                                              
+                                                                                                                                                                                   
+                  return [                                                                                                                                                         
+                      'code' => 0,                                                                                                                                                 
+                      'message' => '下单成功',                                                                                                                                     
+                      'data' => [                                                                                                                                                  
+                          'order_id' => $order->id,                                                                                                                                
+                          'order_no' => $order->order_no,                                                                                                                          
+                      ],                                                                                                                                                           
+                  ];                                                                                                                                                               
+              });                                                                                                                                                                  
+          } finally {                                                                                                                                                              
+              // 说明：                                                                                                                                                            
+              // 如果你想防“短时间重复点击”，这里可以不删，让它自然过期                                                                                                            
+              // 如果你想允许失败后立即重试，可以按业务决定是否删除                                                                                                                
+          }                                                                                                                                                                        
+      }                                                                                                                                                                            
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## app/Controller/OrderSubmitController.php                                                                                                                                      
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  namespace App\Controller;                                                                                                                                                        
+                                                                                                                                                                                   
+  use App\Service\OrderSubmitService;                                                                                                                                              
+  use Hyperf\HttpServer\Annotation\Controller;                                                                                                                                     
+  use Hyperf\HttpServer\Annotation\PostMapping;                                                                                                                                    
+                                                                                                                                                                                   
+  #[Controller(prefix: 'orders')]                                                                                                                                                  
+  class OrderSubmitController                                                                                                                                                      
+  {                                                                                                                                                                                
+      public function __construct(                                                                                                                                                 
+          protected OrderSubmitService $service                                                                                                                                    
+      ) {                                                                                                                                                                          
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      #[PostMapping('submit')]                                                                                                                                                     
+      public function submit(): array                                                                                                                                              
+      {                                                                                                                                                                            
+          $userId = 1;                                                                                                                                                             
+          $skuId = 1001;                                                                                                                                                           
+          $quantity = 2;                                                                                                                                                           
+          $requestId = uniqid('req_', true);                                                                                                                                       
+                                                                                                                                                                                   
+          return $this->service->submit($userId, $skuId, $quantity, $requestId);                                                                                                   
+      }                                                                                                                                                                            
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 这套解决了什么                                                                                                                                                                
+                                                                                                                                                                                   
+  ### 幂等解决                                                                                                                                                                     
+                                                                                                                                                                                   
+  - 连续点击提交                                                                                                                                                                   
+  - 网络重试                                                                                                                                                                       
+  - 接口重复调用                                                                                                                                                                   
+                                                                                                                                                                                   
+  ### 条件扣库存解决                                                                                                                                                               
+                                                                                                                                                                                   
+  - 并发超卖                                                                                                                                                                       
+                                                                                                                                                                                   
+  ### 事务解决                                                                                                                                                                     
+                                                                                                                                                                                   
+  - orders                                                                                                                                                                         
+  - order_items                                                                                                                                                                    
+  - inventory                                                                                                                                                                      
+  - order_logs                                                                                                                                                                     
+                                                                                                                                                                                   
+  一致性问题                                                                                                                                                                       
+                                                                                                                                                                                   
+  ———
+
+
+# 3. 秒杀防超卖版 demo                                                                                                                                                           
+                                                                                                                                                                                   
+  秒杀场景不能只靠数据库事务，不然数据库很容易被打爆。                                                                                                                             
+                                                                                                                                                                                   
+  企业常见方案：                                                                                                                                                                   
+                                                                                                                                                                                   
+  - Redis 预扣库存                                                                                                                                                                 
+  - Lua 原子扣减                                                                                                                                                                   
+  - 抢到资格后异步落库                                                                                                                                                             
+  - MQ 削峰                                                                                                                                                                        
+  - 数据库最终一致性                                                                                                                                                               
+                                                                                                                                                                                   
+  下面给你一个“秒杀基础版”。                                                                                                                                                       
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## app/Service/SeckillOrderService.php                                                                                                                                           
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  namespace App\Service;                                                                                                                                                           
+                                                                                                                                                                                   
+  use App\Constants\TransactionErrorCode;                                                                                                                                          
+  use App\Exception\BusinessException;                                                                                                                                             
+  use App\Model\DemoOrder;                                                                                                                                                         
+  use App\Model\DemoOrderItem;                                                                                                                                                     
+  use App\Model\OrderLog;                                                                                                                                                          
+  use Hyperf\DbConnection\Db;                                                                                                                                                      
+                                                                                                                                                                                   
+  class SeckillOrderService                                                                                                                                                        
+  {                                                                                                                                                                                
+      public function __construct(                                                                                                                                                 
+          protected RedisService $redisService                                                                                                                                     
+      ) {                                                                                                                                                                          
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 秒杀防超卖基础版                                                                                                                                                          
+       *                                                                                                                                                                           
+       * 思路：                                                                                                                                                                    
+       * 1. Redis 先预扣库存                                                                                                                                                       
+       * 2. 抢到库存资格后再落库                                                                                                                                                   
+       * 3. 数据库事务写订单                                                                                                                                                       
+       */                                                                                                                                                                          
+      public function seckill(int $userId, int $skuId, int $quantity, string $requestId): array                                                                                    
+      {                                                                                                                                                                            
+          $idempotentKey = "seckill:submit:{$userId}:{$requestId}";                                                                                                                
+          $stockKey = "seckill:stock:{$skuId}";                                                                                                                                    
+                                                                                                                                                                                   
+          // 1. 幂等校验                                                                                                                                                           
+          $ok = $this->redisService->getClient()->set($idempotentKey, 1, ['nx', 'ex' => 10]);                                                                                      
+          if (! $ok) {                                                                                                                                                             
+              throw new BusinessException(TransactionErrorCode::ORDER_REPEAT_SUBMIT);                                                                                              
+          }                                                                                                                                                                        
+                                                                                                                                                                                   
+          // 2. Redis 原子预扣库存                                                                                                                                                 
+          $lua = <<<'LUA'                                                                                                                                                          
+  local stock = tonumber(redis.call('get', KEYS[1]))                                                                                                                               
+  local num = tonumber(ARGV[1])                                                                                                                                                    
+                                                                                                                                                                                   
+  if not stock then                                                                                                                                                                
+      return -1                                                                                                                                                                    
+  end                                                                                                                                                                              
+                                                                                                                                                                                   
+  if stock < num then                                                                                                                                                              
+      return 0                                                                                                                                                                     
+  end                                                                                                                                                                              
+                                                                                                                                                                                   
+  redis.call('decrby', KEYS[1], num)                                                                                                                                               
+  return 1                                                                                                                                                                         
+  LUA;                                                                                                                                                                             
+                                                                                                                                                                                   
+          $result = $this->redisService->getClient()->eval($lua, [$stockKey, $quantity], 1);                                                                                       
+                                                                                                                                                                                   
+          if ((int) $result === -1) {                                                                                                                                              
+              throw new BusinessException(TransactionErrorCode::INVENTORY_NOT_FOUND);                                                                                              
+          }                                                                                                                                                                        
+                                                                                                                                                                                   
+          if ((int) $result === 0) {                                                                                                                                               
+              throw new BusinessException(TransactionErrorCode::STOCK_NOT_ENOUGH);                                                                                                 
+          }                                                                                                                                                                        
+                                                                                                                                                                                   
+          try {                                                                                                                                                                    
+              // 3. 抢到资格后再写数据库                                                                                                                                           
+              return Db::transaction(function () use ($userId, $skuId, $quantity) {                                                                                                
+                  $price = 99.00;                                                                                                                                                  
+                  $amount = bcmul((string) $price, (string) $quantity, 2);                                                                                                         
+                                                                                                                                                                                   
+                  $order = DemoOrder::query()->create([                                                                                                                            
+                      'order_no' => 'SK' . date('YmdHis') . mt_rand(1000, 9999),                                                                                                   
+                      'user_id' => $userId,                                                                                                                                        
+                      'total_amount' => $amount,                                                                                                                                   
+                      'status' => 1,                                                                                                                                               
+                      'remark' => '秒杀下单 Demo',                                                                                                                                 
+                  ]);                                                                                                                                                              
+                                                                                                                                                                                   
+                  DemoOrderItem::query()->create([                                                                                                                                 
+                      'order_id' => $order->id,                                                                                                                                    
+                      'sku_id' => $skuId,                                                                                                                                          
+                      'product_name' => '秒杀商品',                                                                                                                                
+                      'price' => $price,                                                                                                                                           
+                      'quantity' => $quantity,                                                                                                                                     
+                      'amount' => $amount,                                                                                                                                         
+                  ]);                                                                                                                                                              
+                                                                                                                                                                                   
+                  OrderLog::query()->create([                                                                                                                                      
+                      'order_id' => $order->id,                                                                                                                                    
+                      'content' => '秒杀订单创建成功',                                                                                                                             
+                  ]);                                                                                                                                                              
+                                                                                                                                                                                   
+                  return [                                                                                                                                                         
+                      'code' => 0,                                                                                                                                                 
+                      'message' => '秒杀成功',                                                                                                                                     
+                      'data' => [                                                                                                                                                  
+                          'order_id' => $order->id,                                                                                                                                
+                          'order_no' => $order->order_no,                                                                                                                          
+                      ],                                                                                                                                                           
+                  ];                                                                                                                                                               
+              });                                                                                                                                                                  
+          } catch (\Throwable $throwable) {                                                                                                                                        
+              // 4. 数据库失败，Redis 库存补偿回滚                                                                                                                                 
+              $this->redisService->getClient()->incrBy($stockKey, $quantity);                                                                                                      
+              throw $throwable;                                                                                                                                                    
+          }                                                                                                                                                                        
+      }                                                                                                                                                                            
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 这套秒杀版解决什么                                                                                                                                                            
+                                                                                                                                                                                   
+  ### Redis 预扣                                                                                                                                                                   
+                                                                                                                                                                                   
+  把大量请求挡在 Redis，减少数据库压力。                                                                                                                                           
+                                                                                                                                                                                   
+  ### Lua 原子扣减                                                                                                                                                                 
+                                                                                                                                                                                   
+  避免多个请求同时扣 Redis 库存出错。                                                                                                                                              
+                                                                                                                                                                                   
+  ### 数据库事务                                                                                                                                                                   
+                                                                                                                                                                                   
+  保证订单主表、明细表、日志表一致。                                                                                                                                               
+                                                                                                                                                                                   
+  ### 补偿                                                                                                                                                                         
+                                                                                                                                                                                   
+  如果 DB 落单失败，把 Redis 库存补回去。                                                                                                                                          
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 4. 三套方案怎么选                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 普通下单                                                                                                                                                                      
+                                                                                                                                                                                   
+  用：                                                                                                                                                                             
+                                                                                                                                                                                   
+  - 幂等                                                                                                                                                                           
+  - 事务                                                                                                                                                                           
+  - 条件扣库存                                                                                                                                                                     
+                                                                                                                                                                                   
+  也就是第 2 套。                                                                                                                                                                  
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 普通并发下单                                                                                                                                                                  
+                                                                                                                                                                                   
+  用：                                                                                                                                                                             
+                                                                                                                                                                                   
+  - 事务                                                                                                                                                                           
+  - 条件更新                                                                                                                                                                       
+  - 唯一索引                                                                                                                                                                       
+  - 幂等                                                                                                                                                                           
+                                                                                                                                                                                   
+  也够了。                                                                                                                                                                         
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 秒杀高并发                                                                                                                                                                    
+                                                                                                                                                                                   
+  用：                                                                                                                                                                             
+                                                                                                                                                                                   
+  - Redis 预扣库存                                                                                                                                                                 
+  - Lua 原子扣减                                                                                                                                                                   
+  - MQ / 异步化                                                                                                                                                                    
+  - 数据库最终落单                                                                                                                                                                 
+  - 失败补偿                                                                                                                                                                       
+                                                                                                                                                                                   
+  也就是第 3 套思路。                                                                                                                                                              
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 5. 一句话总结                                                                                                                                                                  
+                                                                                                                                                                                   
+  ### 企业版防超卖                                                                                                                                                                 
+                                                                                                                                                                                   
+  > 条件扣库存 + 事务                                                                                                                                                              
+                                                                                                                                                                                   
+  ### 企业版完整下单                                                                                                                                                               
+                                                                                                                                                                                   
+  > 幂等 + 事务 + 条件扣库存                                                                                                                                                       
+                                                                                                                                                                                   
+  ### 秒杀版防超卖                                                                                                                                                                 
+                                                                                                                                                                                   
+  > Redis 预扣 + Lua 原子扣减 + DB 事务 + 补偿
+
+
+> 幂等 key 到底删不删，取决于你的业务语义。                                                                                                                                      
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 1. 为什么这里不能随便删                                                                                                                                                        
+                                                                                                                                                                                   
+  你这里的 key：                                                                                                                                                                   
+                                                                                                                                                                                   
+  $idempotentKey = "order:submit:{$userId}:{$requestId}";                                                                                                                          
+                                                                                                                                                                                   
+  作用是防止：                                                                                                                                                                     
+                                                                                                                                                                                   
+  - 用户重复点击                                                                                                                                                                   
+  - 前端重复提交                                                                                                                                                                   
+  - 网关重试                                                                                                                                                                       
+  - 接口短时间重复调用                                                                                                                                                             
+                                                                                                                                                                                   
+  如果你在 finally 里直接删掉：                                                                                                                                                    
+                                                                                                                                                                                   
+  $this->redisService->delete($idempotentKey);                                                                                                                                     
+                                                                                                                                                                                   
+  那请求刚执行完，用户马上再点一次，就又能进来了。                                                                                                                                 
+  这样就失去幂等保护了。                                                                                                                                                           
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 2. 常见三种处理方式                                                                                                                                                            
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 方案一：不删除，等它自然过期                                                                                                                                                  
+                                                                                                                                                                                   
+  适合：                                                                                                                                                                           
+                                                                                                                                                                                   
+  - 防短时间重复点击                                                                                                                                                               
+  - 防重复下单                                                                                                                                                                     
+  - 前端一次请求一个唯一 requestId                                                                                                                                                 
+                                                                                                                                                                                   
+  finally {                                                                                                                                                                        
+      // 不删除，让 key 自然过期                                                                                                                                                   
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ### 优点                                                                                                                                                                         
+                                                                                                                                                                                   
+  - 最简单                                                                                                                                                                         
+  - 防重复提交效果稳定                                                                                                                                                             
+                                                                                                                                                                                   
+  ### 缺点                                                                                                                                                                         
+                                                                                                                                                                                   
+  - TTL 期间同一个 requestId 不能再提交                                                                                                                                            
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 方案二：只有失败时删除，成功时不删                                                                                                                                            
+                                                                                                                                                                                   
+  适合：                                                                                                                                                                           
+                                                                                                                                                                                   
+  - 成功请求不允许重复提交                                                                                                                                                         
+  - 失败后允许用户立刻重试                                                                                                                                                         
+                                                                                                                                                                                   
+  这是企业里很常见的一种。                                                                                                                                                         
+                                                                                                                                                                                   
+  ### 完整写法                                                                                                                                                                     
+                                                                                                                                                                                   
+  public function submit(int $userId, int $skuId, int $quantity, string $requestId): array                                                                                         
+  {                                                                                                                                                                                
+      if ($quantity <= 0) {                                                                                                                                                        
+          throw new BusinessException(TransactionErrorCode::ORDER_QUANTITY_INVALID);                                                                                               
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      $idempotentKey = "order:submit:{$userId}:{$requestId}";                                                                                                                      
+      $locked = $this->redisService->getClient()->set($idempotentKey, 1, ['nx', 'ex' => 10]);                                                                                      
+                                                                                                                                                                                   
+      if (! $locked) {                                                                                                                                                             
+          throw new BusinessException(TransactionErrorCode::ORDER_REPEAT_SUBMIT);                                                                                                  
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      $success = false;                                                                                                                                                            
+                                                                                                                                                                                   
+      try {                                                                                                                                                                        
+          $result = Db::transaction(function () use ($userId, $skuId, $quantity) {                                                                                                 
+              $inventory = Inventory::query()                                                                                                                                      
+                  ->where('sku_id', $skuId)                                                                                                                                        
+                  ->first();                                                                                                                                                       
+                                                                                                                                                                                   
+              if (! $inventory) {                                                                                                                                                  
+                  throw new BusinessException(TransactionErrorCode::INVENTORY_NOT_FOUND);                                                                                          
+              }                                                                                                                                                                    
+                                                                                                                                                                                   
+              $price = 199.00;                                                                                                                                                     
+              $amount = bcmul((string) $price, (string) $quantity, 2);                                                                                                             
+                                                                                                                                                                                   
+              $order = DemoOrder::query()->create([                                                                                                                                
+                  'order_no' => 'ORD' . date('YmdHis') . mt_rand(1000, 9999),                                                                                                      
+                  'user_id' => $userId,                                                                                                                                            
+                  'total_amount' => $amount,                                                                                                                                       
+                  'status' => 1,                                                                                                                                                   
+                  'remark' => '幂等 + 事务 + 条件扣库存 Demo',                                                                                                                     
+              ]);                                                                                                                                                                  
+                                                                                                                                                                                   
+              DemoOrderItem::query()->create([                                                                                                                                     
+                  'order_id' => $order->id,                                                                                                                                        
+                  'sku_id' => $skuId,                                                                                                                                              
+                  'product_name' => '测试商品A',                                                                                                                                   
+                  'price' => $price,                                                                                                                                               
+                  'quantity' => $quantity,                                                                                                                                         
+                  'amount' => $amount,                                                                                                                                             
+              ]);                                                                                                                                                                  
+                                                                                                                                                                                   
+              $affected = Inventory::query()                                                                                                                                       
+                  ->where('sku_id', $skuId)                                                                                                                                        
+                  ->where('stock', '>=', $quantity)                                                                                                                                
+                  ->decrement('stock', $quantity);                                                                                                                                 
+                                                                                                                                                                                   
+              if ($affected === 0) {                                                                                                                                               
+                  throw new BusinessException(TransactionErrorCode::STOCK_NOT_ENOUGH);                                                                                             
+              }                                                                                                                                                                    
+                                                                                                                                                                                   
+              OrderLog::query()->create([                                                                                                                                          
+                  'order_id' => $order->id,                                                                                                                                        
+                  'content' => '订单创建成功，库存扣减成功，幂等校验通过',                                                                                                         
+              ]);                                                                                                                                                                  
+                                                                                                                                                                                   
+              return [                                                                                                                                                             
+                  'code' => 0,                                                                                                                                                     
+                  'message' => '下单成功',                                                                                                                                         
+                  'data' => [                                                                                                                                                      
+                      'order_id' => $order->id,                                                                                                                                    
+                      'order_no' => $order->order_no,                                                                                                                              
+                  ],                                                                                                                                                               
+              ];                                                                                                                                                                   
+          });                                                                                                                                                                      
+                                                                                                                                                                                   
+          $success = true;                                                                                                                                                         
+                                                                                                                                                                                   
+          return $result;                                                                                                                                                          
+      } finally {                                                                                                                                                                  
+          // 成功不删：防重复提交                                                                                                                                                  
+          // 失败删除：允许用户重新提交                                                                                                                                            
+          if (! $success) {                                                                                                                                                        
+              $this->redisService->delete($idempotentKey);                                                                                                                         
+          }                                                                                                                                                                        
+      }                                                                                                                                                                            
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ### 这个方案的含义                                                                                                                                                               
+                                                                                                                                                                                   
+  - 成功：保留 key，防止重复提交                                                                                                                                                   
+  - 失败：删除 key，允许重试                                                                                                                                                       
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 方案三：把结果也缓存进去                                                                                                                                                      
+                                                                                                                                                                                   
+  适合更强幂等场景，比如支付、创建订单 API。                                                                                                                                       
+                                                                                                                                                                                   
+  思路：                                                                                                                                                                           
+                                                                                                                                                                                   
+  - 第一次请求成功后，把结果缓存到 Redis                                                                                                                                           
+  - 第二次同样的 requestId 进来，直接返回第一次结果                                                                                                                                
+                                                                                                                                                                                   
+  这个是更高级的企业写法。                                                                                                                                                         
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 3. 你现在这段最推荐怎么补                                                                                                                                                      
+                                                                                                                                                                                   
+  如果你现在是“普通下单接口”，我最推荐你用：                                                                                                                                       
+                                                                                                                                                                                   
+  > 失败删 key，成功不删                                                                                                                                                           
+                                                                                                                                                                                   
+  也就是上面那个 $success 方案。                                                                                                                                                   
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 4. 为什么不用 catch 里删，而用 finally                                                                                                                                         
+                                                                                                                                                                                   
+  因为 finally 一定会执行。                                                                                                                                                        
+                                                                                                                                                                                   
+  你可以统一兜底：                                                                                                                                                                 
+                                                                                                                                                                                   
+  finally {                                                                                                                                                                        
+      if (! $success) {                                                                                                                                                            
+          $this->redisService->delete($idempotentKey);                                                                                                                             
+      }                                                                                                                                                                            
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  这样无论：                                                                                                                                                                       
+                                                                                                                                                                                   
+  - 业务异常                                                                                                                                                                       
+  - 数据库异常                                                                                                                                                                     
+  - 代码异常                                                                                                                                                                       
+                                                                                                                                                                                   
+  都能保证失败时清理 key。                                                                                                                                                         
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 5. 最终补完整就是这段                                                                                                                                                          
+                                                                                                                                                                                   
+  $success = false;                                                                                                                                                                
+                                                                                                                                                                                   
+  try {                                                                                                                                                                            
+      $result = Db::transaction(function () use ($userId, $skuId, $quantity) {                                                                                                     
+          // 业务逻辑                                                                                                                                                              
+      });                                                                                                                                                                          
+                                                                                                                                                                                   
+      $success = true;                                                                                                                                                             
+                                                                                                                                                                                   
+      return $result;                                                                                                                                                              
+  } finally {                                                                                                                                                                      
+      // 成功不删，避免短时间重复提交                                                                                                                                              
+      // 失败删除，允许用户重新发起请求                                                                                                                                            
+      if (! $success) {                                                                                                                                                            
+          $this->redisService->delete($idempotentKey);                                                                                                                             
+      }                                                                                                                                                                            
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 6. 一句话记忆                                                                                                                                                                  
+                                                                                                                                                                                   
+  ## 成功不删                                                                                                                                                                      
+                                                                                                                                                                                   
+  防重复提交                                                                                                                                                                       
+                                                                                                                                                                                   
+  ## 失败删除                                                                                                                                                                      
+                                                                                                                                                                                   
+  允许重试
+
