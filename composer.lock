@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "9228170573ee2e097c02cd8ce6d737a6",
+    "content-hash": "9123b8fd763376cdeb75da5733e5a03d",
     "packages": [
         {
             "name": "carbonphp/carbon-doctrine-types",
@@ -3962,6 +3962,67 @@
                 }
             ],
             "time": "2025-10-11T18:13:12+00:00"
+        },
+        {
+            "name": "lhh-gh/hyperf-swagger-sa-generator",
+            "version": "dev-main",
+            "dist": {
+                "type": "path",
+                "url": "../hyperf-swagger-sa-generator",
+                "reference": "87624778281795f03284397dc233d37c4892f6f2"
+            },
+            "require": {
+                "hyperf/di": "3.1.*",
+                "php": ">=8.1"
+            },
+            "require-dev": {
+                "friendsofphp/php-cs-fixer": "^3.0",
+                "mockery/mockery": "^1.0",
+                "phpstan/phpstan": "^1.0",
+                "phpunit/phpunit": "^10.0",
+                "swoole/ide-helper": "dev-master"
+            },
+            "suggest": {
+                "swow/swow": "Required to create swow components."
+            },
+            "type": "library",
+            "extra": {
+                "hyperf": {
+                    "config": "LhhGh\\HyperfSwaggerSaGenerator\\ConfigProvider"
+                }
+            },
+            "autoload": {
+                "psr-4": {
+                    "LhhGh\\HyperfSwaggerSaGenerator\\": "src/"
+                }
+            },
+            "autoload-dev": {
+                "psr-4": {
+                    "HyperfTest\\": "tests"
+                }
+            },
+            "scripts": {
+                "test": [
+                    "phpunit -c phpunit.xml --colors=always"
+                ],
+                "analyse": [
+                    "phpstan analyse --memory-limit 1024M -l 0 ./src"
+                ],
+                "cs-fix": [
+                    "php-cs-fixer fix $1"
+                ]
+            },
+            "license": [
+                "MIT"
+            ],
+            "description": "Hyperf Swagger SA 风格控制器生成器",
+            "keywords": [
+                "hyperf",
+                "php"
+            ],
+            "transport-options": {
+                "relative": true
+            }
         },
         {
             "name": "monolog/monolog",
@@ -10180,7 +10241,8 @@
     "prefer-stable": true,
     "prefer-lowest": false,
     "platform": {
-        "php": ">=8.1"
+        "php": ">=8.1",
+        "ext-bcmath": "*"
     },
     "platform-dev": {},
     "plugin-api-version": "2.9.0"
