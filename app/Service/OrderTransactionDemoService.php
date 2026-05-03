@@ -6,7 +6,6 @@ namespace App\Service;
 
 use App\Constants\TransactionErrorCode;
 use App\Exception\BusinessException;
-use App\Exception\TransactionBusinessException;
 use App\Model\DemoOrder;
 use App\Model\DemoOrderItem;
 use App\Model\Inventory;
@@ -16,46 +15,36 @@ use Hyperf\DbConnection\Db;
 class OrderTransactionDemoService
 {
     /**
-     * 多表事务 Demo
-     *
-     * 涉及：
-     * - orders
-     * - order_items
-     * - inventory
-     * - order_logs
+     * 企业版防超卖事务 Demo
      */
-    public function createOrder(): array
+    public function createOrder(int $userId, int $skuId, int $quantity): array
     {
-        return Db::transaction(function () {
-            $skuId = 1001;
-            $quantity = 2;
-            $price = 199.00;
-            $amount = bcmul((string) $price, (string) $quantity, 2);
+        if ($quantity <= 0) {
+            throw new BusinessException(TransactionErrorCode::ORDER_QUANTITY_INVALID);
+        }
 
-            // 1. 查询库存并加锁
+        return Db::transaction(function () use ($userId, $skuId, $quantity) {
             $inventory = Inventory::query()
                 ->where('sku_id', $skuId)
-                ->lockForUpdate()
                 ->first();
 
             if (! $inventory) {
                 throw new BusinessException(TransactionErrorCode::INVENTORY_NOT_FOUND);
             }
 
-            if ($inventory->stock < $quantity) {
-                throw new TransactionBusinessException(TransactionErrorCode::STOCK_NOT_ENOUGH);
-            }
+            $price = 199.00;
+            $amount = bcmul((string) $price, (string) $quantity, 2);
 
-            // 2. 创建订单主表
+            // 1. 创建订单主表
             $order = DemoOrder::query()->create([
                 'order_no' => 'ORD' . date('YmdHis') . mt_rand(1000, 9999),
-                'user_id' => 1,
+                'user_id' => $userId,
                 'total_amount' => $amount,
                 'status' => 1,
-                'remark' => '事务多表更新 Demo',
+                'remark' => '企业版防超卖事务 Demo',
             ]);
 
-            // 3. 创建订单明细
+            // 2. 创建订单明细
             DemoOrderItem::query()->create([
                 'order_id' => $order->id,
                 'sku_id' => $skuId,
@@ -65,14 +54,20 @@ class OrderTransactionDemoService
                 'amount' => $amount,
             ]);
 
-            // 4. 扣减库存
-            $inventory->stock -= $quantity;
-            $inventory->save();
+            // 3. 条件扣库存：防超卖关键
+            $affected = Inventory::query()
+                ->where('sku_id', $skuId)
+                ->where('stock', '>=', $quantity)
+                ->decrement('stock', $quantity);
 
-            // 5. 写订单日志
+            if ($affected === 0) {
+                throw new BusinessException(TransactionErrorCode::STOCK_NOT_ENOUGH);
+            }
+
+            // 4. 写订单日志
             OrderLog::query()->create([
                 'order_id' => $order->id,
-                'content' => '订单创建成功，扣减库存完成',
+                'content' => '订单创建成功，库存扣减成功',
             ]);
 
             return [
