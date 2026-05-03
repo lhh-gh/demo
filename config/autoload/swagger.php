@@ -17,7 +17,9 @@ return [
     'url' => '/swagger',
     'auto_generate' => true,
     'scan' => [
-        'paths' => null,
+        'paths' => [
+            BASE_PATH . '/app',
+        ],
     ],
     'processors' => [
         // users can append their own processors here
