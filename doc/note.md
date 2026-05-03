@@ -14076,3 +14076,359 @@ class TransactionBusinessRollbackDemoService
   - order_items                                                                                                                                                                    
   - inventory                                                                                                                                                                      
   - order_logs
+目标：                                                                                                                                                                           
+                                                                                                                                                                                   
+  - orders：订单主表                                                                                                                                                               
+  - order_items：订单明细表                                                                                                                                                        
+  - inventory：库存表                                                                                                                                                              
+  - order_logs：订单日志表                                                                                                                                                         
+                                                                                                                                                                                   
+  并且保证：                                                                                                                                                                       
+                                                                                                                                                                                   
+  > 要么 4 张表都成功                                                                                                                                                              
+  > 要么中途报错全部回滚                                                                                                                                                           
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 一、业务场景                                                                                                                                                                   
+                                                                                                                                                                                   
+  用户下单时：                                                                                                                                                                     
+                                                                                                                                                                                   
+  1. 创建订单                                                                                                                                                                      
+  2. 创建订单明细                                                                                                                                                                  
+  3. 扣减库存                                                                                                                                                                      
+  4. 写订单日志                                                                                                                                                                    
+  5. 最后提交事务                                                                                                                                                                  
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  <?php
+
+declare(strict_types=1);
+
+namespace App\Service;
+
+use App\Constants\TransactionErrorCode;
+use App\Exception\BusinessException;
+use App\Exception\TransactionBusinessException;
+use App\Model\DemoOrder;
+use App\Model\DemoOrderItem;
+use App\Model\Inventory;
+use App\Model\OrderLog;
+use Hyperf\DbConnection\Db;
+
+class OrderTransactionDemoService
+{
+    /**
+     * 多表事务 Demo
+     *
+     * 涉及：
+     * - orders
+     * - order_items
+     * - inventory
+     * - order_logs
+     */
+    public function createOrder(): array
+    {
+        return Db::transaction(function () {
+            $skuId = 1001;
+            $quantity = 2;
+            $price = 199.00;
+            $amount = bcmul((string) $price, (string) $quantity, 2);
+
+            // 1. 查询库存并加锁
+            $inventory = Inventory::query()
+                ->where('sku_id', $skuId)
+                ->lockForUpdate()
+                ->first();
+
+            if (! $inventory) {
+                throw new BusinessException(TransactionErrorCode::INVENTORY_NOT_FOUND);
+            }
+
+            if ($inventory->stock < $quantity) {
+                throw new TransactionBusinessException(TransactionErrorCode::STOCK_NOT_ENOUGH);
+            }
+
+            // 2. 创建订单主表
+            $order = DemoOrder::query()->create([
+                'order_no' => 'ORD' . date('YmdHis') . mt_rand(1000, 9999),
+                'user_id' => 1,
+                'total_amount' => $amount,
+                'status' => 1,
+                'remark' => '事务多表更新 Demo',
+            ]);
+
+            // 3. 创建订单明细
+            DemoOrderItem::query()->create([
+                'order_id' => $order->id,
+                'sku_id' => $skuId,
+                'product_name' => '测试商品A',
+                'price' => $price,
+                'quantity' => $quantity,
+                'amount' => $amount,
+            ]);
+
+            // 4. 扣减库存
+            $inventory->stock -= $quantity;
+            $inventory->save();
+
+            // 5. 写订单日志
+            OrderLog::query()->create([
+                'order_id' => $order->id,
+                'content' => '订单创建成功，扣减库存完成',
+            ]);
+
+            return [
+                'code' => 0,
+                'message' => '下单成功',
+                'data' => [
+                    'order_id' => $order->id,
+                    'order_no' => $order->order_no,
+                ],
+            ];
+        });
+    }
+}                                                                                                                                                                    
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 三、Controller Demo                                                                                                                                                            
+                                                                                                                                                                                   
+  ## app/Controller/OrderTransactionDemoController.php                                                                                                                             
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  namespace App\Controller;                                                                                                                                                        
+                                                                                                                                                                                   
+  use App\Service\OrderTransactionDemoService;                                                                                                                                     
+  use Hyperf\HttpServer\Annotation\Controller;                                                                                                                                     
+  use Hyperf\HttpServer\Annotation\PostMapping;                                                                                                                                    
+                                                                                                                                                                                   
+  #[Controller(prefix: 'order-transaction')]                                                                                                                                       
+  class OrderTransactionDemoController                                                                                                                                             
+  {                                                                                                                                                                                
+      public function __construct(                                                                                                                                                 
+          protected OrderTransactionDemoService $service                                                                                                                           
+      ) {                                                                                                                                                                          
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      #[PostMapping('create')]                                                                                                                                                     
+      public function create(): array                                                                                                                                              
+      {                                                                                                                                                                            
+          return $this->service->createOrder();                                                                                                                                    
+      }                                                                                                                                                                            
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  访问地址：                                                                                                                                                                       
+                                                                                                                                                                                   
+  POST /order-transaction/create                                                                                                                                                   
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 四、模型 Demo                                                                                                                                                                  
+                                                                                                                                                                                   
+  ## app/Model/DemoOrder.php                                                                                                                                                       
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  namespace App\Model;                                                                                                                                                             
+                                                                                                                                                                                   
+  use Hyperf\DbConnection\Model\Model;                                                                                                                                             
+                                                                                                                                                                                   
+  class DemoOrder extends Model                                                                                                                                                    
+  {                                                                                                                                                                                
+      protected ?string $table = 'orders';                                                                                                                                         
+                                                                                                                                                                                   
+      protected array $fillable = [                                                                                                                                                
+          'order_no',                                                                                                                                                              
+          'user_id',                                                                                                                                                               
+          'total_amount',                                                                                                                                                          
+          'status',                                                                                                                                                                
+          'remark',                                                                                                                                                                
+          'created_at',                                                                                                                                                            
+          'updated_at',                                                                                                                                                            
+      ];                                                                                                                                                                           
+                                                                                                                                                                                   
+      protected array $casts = [                                                                                                                                                   
+          'id' => 'integer',                                                                                                                                                       
+          'user_id' => 'integer',                                                                                                                                                  
+          'status' => 'integer',                                                                                                                                                   
+      ];                                                                                                                                                                           
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ## app/Model/DemoOrderItem.php                                                                                                                                                   
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  namespace App\Model;                                                                                                                                                             
+                                                                                                                                                                                   
+  use Hyperf\DbConnection\Model\Model;                                                                                                                                             
+                                                                                                                                                                                   
+  class DemoOrderItem extends Model                                                                                                                                                
+  {                                                                                                                                                                                
+      protected ?string $table = 'order_items';                                                                                                                                    
+                                                                                                                                                                                   
+      protected array $fillable = [                                                                                                                                                
+          'order_id',                                                                                                                                                              
+          'sku_id',                                                                                                                                                                
+          'product_name',                                                                                                                                                          
+          'price',                                                                                                                                                                 
+          'quantity',                                                                                                                                                              
+          'amount',                                                                                                                                                                
+          'created_at',                                                                                                                                                            
+          'updated_at',                                                                                                                                                            
+      ];                                                                                                                                                                           
+                                                                                                                                                                                   
+      protected array $casts = [                                                                                                                                                   
+          'id' => 'integer',                                                                                                                                                       
+          'order_id' => 'integer',                                                                                                                                                 
+          'sku_id' => 'integer',                                                                                                                                                   
+          'quantity' => 'integer',                                                                                                                                                 
+      ];                                                                                                                                                                           
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ## app/Model/OrderLog.php                                                                                                                                                        
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  namespace App\Model;                                                                                                                                                             
+                                                                                                                                                                                   
+  use Hyperf\DbConnection\Model\Model;                                                                                                                                             
+                                                                                                                                                                                   
+  class OrderLog extends Model                                                                                                                                                     
+  {                                                                                                                                                                                
+      protected ?string $table = 'order_logs';                                                                                                                                     
+                                                                                                                                                                                   
+      protected array $fillable = [                                                                                                                                                
+          'order_id',                                                                                                                                                              
+          'content',                                                                                                                                                               
+          'created_at',                                                                                                                                                            
+          'updated_at',                                                                                                                                                            
+      ];                                                                                                                                                                           
+                                                                                                                                                                                   
+      protected array $casts = [                                                                                                                                                   
+          'id' => 'integer',                                                                                                                                                       
+          'order_id' => 'integer',                                                                                                                                                 
+      ];                                                                                                                                                                           
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 五、SQL 表结构                                                                                                                                                                 
+                                                                                                                                                                                   
+  ## 1）orders                                                                                                                                                                     
+                                                                                                                                                                                   
+  DROP TABLE IF EXISTS `orders`;                                                                                                                                                   
+  CREATE TABLE `orders` (                                                                                                                                                          
+    `id` bigint unsigned NOT NULL AUTO_INCREMENT,                                                                                                                                  
+    `order_no` varchar(64) NOT NULL,                                                                                                                                               
+    `user_id` bigint unsigned NOT NULL,                                                                                                                                            
+    `total_amount` decimal(10,2) NOT NULL DEFAULT 0.00,                                                                                                                            
+    `status` tinyint NOT NULL DEFAULT 1,                                                                                                                                           
+    `remark` varchar(255) DEFAULT NULL,                                                                                                                                            
+    `created_at` datetime DEFAULT NULL,                                                                                                                                            
+    `updated_at` datetime DEFAULT NULL,                                                                                                                                            
+    PRIMARY KEY (`id`),                                                                                                                                                            
+    UNIQUE KEY `uk_order_no` (`order_no`)                                                                                                                                          
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;                                                                                                                                         
+                                                                                                                                                                                   
+  ## 2）order_items                                                                                                                                                                
+                                                                                                                                                                                   
+  DROP TABLE IF EXISTS `order_items`;                                                                                                                                              
+  CREATE TABLE `order_items` (                                                                                                                                                     
+    `id` bigint unsigned NOT NULL AUTO_INCREMENT,                                                                                                                                  
+    `order_id` bigint unsigned NOT NULL,                                                                                                                                           
+    `sku_id` bigint unsigned NOT NULL,                                                                                                                                             
+    `product_name` varchar(100) NOT NULL,                                                                                                                                          
+    `price` decimal(10,2) NOT NULL DEFAULT 0.00,                                                                                                                                   
+    `quantity` int unsigned NOT NULL DEFAULT 1,                                                                                                                                    
+    `amount` decimal(10,2) NOT NULL DEFAULT 0.00,                                                                                                                                  
+    `created_at` datetime DEFAULT NULL,                                                                                                                                            
+    `updated_at` datetime DEFAULT NULL,                                                                                                                                            
+    PRIMARY KEY (`id`),                                                                                                                                                            
+    KEY `idx_order_id` (`order_id`)                                                                                                                                                
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;                                                                                                                                         
+                                                                                                                                                                                   
+  ## 3）inventories                                                                                                                                                                
+                                                                                                                                                                                   
+  DROP TABLE IF EXISTS `inventories`;                                                                                                                                              
+  CREATE TABLE `inventories` (                                                                                                                                                     
+    `id` bigint unsigned NOT NULL AUTO_INCREMENT,                                                                                                                                  
+    `sku_id` bigint unsigned NOT NULL,                                                                                                                                             
+    `stock` int NOT NULL DEFAULT 0,                                                                                                                                                
+    `created_at` datetime DEFAULT NULL,                                                                                                                                            
+    `updated_at` datetime DEFAULT NULL,                                                                                                                                            
+    PRIMARY KEY (`id`),                                                                                                                                                            
+    UNIQUE KEY `uk_sku_id` (`sku_id`)                                                                                                                                              
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;                                                                                                                                         
+                                                                                                                                                                                   
+  测试数据：                                                                                                                                                                       
+                                                                                                                                                                                   
+  INSERT INTO `inventories` (`sku_id`, `stock`, `created_at`, `updated_at`)                                                                                                        
+  VALUES (1001, 20, NOW(), NOW());                                                                                                                                                 
+                                                                                                                                                                                   
+  ## 4）order_logs                                                                                                                                                                 
+                                                                                                                                                                                   
+  DROP TABLE IF EXISTS `order_logs`;                                                                                                                                               
+  CREATE TABLE `order_logs` (                                                                                                                                                      
+    `id` bigint unsigned NOT NULL AUTO_INCREMENT,                                                                                                                                  
+    `order_id` bigint unsigned NOT NULL,                                                                                                                                           
+    `content` varchar(255) NOT NULL,                                                                                                                                               
+    `created_at` datetime DEFAULT NULL,                                                                                                                                            
+    `updated_at` datetime DEFAULT NULL,                                                                                                                                            
+    PRIMARY KEY (`id`),                                                                                                                                                            
+    KEY `idx_order_id` (`order_id`)                                                                                                                                                
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;                                                                                                                                         
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 六、执行流程                                                                                                                                                                   
+                                                                                                                                                                                   
+  1. 查 inventory 并 lockForUpdate                                                                                                                                                 
+  2. 判断库存                                                                                                                                                                      
+  3. 写 orders                                                                                                                                                                     
+  4. 写 order_items                                                                                                                                                                
+  5. 扣 inventory                                                                                                                                                                  
+  6. 写 order_logs                                                                                                                                                                 
+  7. 全部成功后 commit                                                                                                                                                             
+                                                                                                                                                                                   
+  如果任一步失败：                                                                                                                                                                 
+                                                                                                                                                                                   
+  抛异常 -> 整个事务回滚                                                                                                                                                           
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 七、这个 demo 为什么重要                                                                                                                                                       
+                                                                                                                                                                                   
+  因为它就是企业项目里最常见的事务场景：                                                                                                                                           
+                                                                                                                                                                                   
+  - 主表                                                                                                                                                                           
+  - 子表                                                                                                                                                                           
+  - 库存                                                                                                                                                                           
+  - 日志                                                                                                                                                                           
+                                                                                                                                                                                   
+  这比单表事务更接近真实开发。                                                                                                                                                     
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 八、如果你想测试回滚                                                                                                                                                           
+                                                                                                                                                                                   
+  你可以故意在“扣库存后、写日志前”加一行：                                                                                                                                         
+                                                                                                                                                                                   
+  throw new BusinessException('模拟写日志失败', 20003);                                                                                                                            
+                                                                                                                                                                                   
+  这样会看到：                                                                                                                                                                     
+                                                                                                                                                                                   
+  - orders 回滚                                                                                                                                                                    
+  - order_items 回滚                                                                                                                                                               
+  - inventory 回滚                                                                                                                                                                 
+  - order_logs 也不会写入
