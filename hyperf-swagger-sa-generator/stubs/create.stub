@@ -1,0 +1,25 @@
+    #[SA\Post(
+        path: '/{{RoutePrefix}}/create',
+        summary: '新增数据',
+        tags: ['{{TagName}}']
+    )]
+    #[SA\RequestBody(
+        description: '请求参数',
+        content: [
+            new SA\MediaType(
+                mediaType: 'application/json',
+                schema: new SA\Schema(
+                    required: ['name'],
+                    properties: [
+                        new SA\Property(property: 'name', type: 'string', description: '名称', example: '测试名称'),
+                        new SA\Property(property: 'status', type: 'integer', description: '状态', example: 1),
+                    ]
+                ),
+            ),
+        ],
+    )]
+    #[SA\Response(response: 200, description: '新增成功')]
+    public function create(): array
+    {
+        return [];
+    }

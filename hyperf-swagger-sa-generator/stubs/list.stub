@@ -1,0 +1,24 @@
+    #[SA\Get(
+        path: '/{{RoutePrefix}}/list',
+        summary: '列表查询',
+        tags: ['{{TagName}}']
+    )]
+    #[SA\Parameter(
+        name: 'page',
+        description: '页码',
+        in: 'query',
+        required: false,
+        schema: new SA\Schema(type: 'integer', default: 1)
+    )]
+    #[SA\Parameter(
+        name: 'page_size',
+        description: '每页数量',
+        in: 'query',
+        required: false,
+        schema: new SA\Schema(type: 'integer', default: 10)
+    )]
+    #[SA\Response(response: 200, description: '查询成功')]
+    public function list(): array
+    {
+        return [];
+    }

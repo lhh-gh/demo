@@ -1,0 +1,17 @@
+    #[SA\Delete(
+        path: '/{{RoutePrefix}}/delete',
+        summary: '删除数据',
+        tags: ['{{TagName}}']
+    )]
+    #[SA\Parameter(
+        name: 'id',
+        description: '主键ID',
+        in: 'query',
+        required: true,
+        schema: new SA\Schema(type: 'integer')
+    )]
+    #[SA\Response(response: 200, description: '删除成功')]
+    public function delete(): array
+    {
+        return [];
+    }

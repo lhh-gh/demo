@@ -1,0 +1,25 @@
+    #[SA\Put(
+        path: '/{{RoutePrefix}}/update',
+        summary: '更新数据',
+        tags: ['{{TagName}}']
+    )]
+    #[SA\RequestBody(
+        description: '更新参数',
+        content: [
+            new SA\MediaType(
+                mediaType: 'application/json',
+                schema: new SA\Schema(
+                    required: ['id', 'name'],
+                    properties: [
+                        new SA\Property(property: 'id', type: 'integer', description: '主键ID', example: 1),
+                        new SA\Property(property: 'name', type: 'string', description: '名称', example: '新名称'),
+                    ]
+                ),
+            ),
+        ],
+    )]
+    #[SA\Response(response: 200, description: '更新成功')]
+    public function update(): array
+    {
+        return [];
+    }
