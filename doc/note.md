@@ -13832,7 +13832,237 @@ class TransactionBusinessException extends BusinessException
                                                                                                                                                                                    
   - 订单不会真的落库
 
+# 1. 手动事务 beginTransaction + rollBack 版 demo                                                                                                                                
+                                                                                                                                                                                   
+  ## app/Service/TransactionManualRollbackDemoService.php                                                                                                                          
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  namespace App\Service;                                                                                                                                                           
+                                                                                                                                                                                   
+  use App\Model\DemoTransactionOrder;                                                                                                                                              
+  use App\Model\Inventory;                                                                                                                                                         
+  use Hyperf\DbConnection\Db;                                                                                                                                                      
+  use RuntimeException;                                                                                                                                                            
+  use Throwable;                                                                                                                                                                   
+                                                                                                                                                                                   
+  /**                                                                                                                                                                              
+   * 手动事务回滚 Demo                                                                                                                                                             
+   */                                                                                                                                                                              
+  class TransactionManualRollbackDemoService                                                                                                                                       
+  {                                                                                                                                                                                
+      /**                                                                                                                                                                          
+       * 执行流程：                                                                                                                                                                
+       * 1. 开启事务                                                                                                                                                               
+       * 2. 创建订单                                                                                                                                                               
+       * 3. 查询库存                                                                                                                                                               
+       * 4. 模拟扣库存时报错                                                                                                                                                       
+       * 5. 手动回滚事务                                                                                                                                                           
+       */                                                                                                                                                                          
+      public function createOrderAndRollback(int $skuId, int $quantity): array                                                                                                     
+      {                                                                                                                                                                            
+          Db::beginTransaction();                                                                                                                                                  
+                                                                                                                                                                                   
+          try {                                                                                                                                                                    
+              // 1. 创建订单                                                                                                                                                       
+              $order = DemoTransactionOrder::query()->create([                                                                                                                     
+                  'order_no' => 'MRB' . date('YmdHis') . mt_rand(1000, 9999),                                                                                                      
+                  'sku_id' => $skuId,                                                                                                                                              
+                  'quantity' => $quantity,                                                                                                                                         
+                  'status' => 1,                                                                                                                                                   
+                  'remark' => '手动事务回滚 Demo',                                                                                                                                 
+              ]);                                                                                                                                                                  
+                                                                                                                                                                                   
+              // 2. 查询库存                                                                                                                                                       
+              $inventory = Inventory::query()                                                                                                                                      
+                  ->where('sku_id', $skuId)                                                                                                                                        
+                  ->lockForUpdate()                                                                                                                                                
+                  ->first();                                                                                                                                                       
+                                                                                                                                                                                   
+              if (! $inventory) {                                                                                                                                                  
+                  throw new RuntimeException('库存记录不存在');                                                                                                                    
+              }                                                                                                                                                                    
+                                                                                                                                                                                   
+              // 3. 模拟扣库存时报错                                                                                                                                               
+              throw new RuntimeException('模拟异常：扣库存失败，手动回滚事务');                                                                                                    
+                                                                                                                                                                                   
+              // 4. 这段代码不会执行                                                                                                                                               
+              $inventory->stock -= $quantity;                                                                                                                                      
+              $inventory->save();                                                                                                                                                  
+                                                                                                                                                                                   
+              Db::commit();                                                                                                                                                        
+                                                                                                                                                                                   
+              return [                                                                                                                                                             
+                  'code' => 0,                                                                                                                                                     
+                  'message' => 'success',                                                                                                                                          
+                  'data' => $order->toArray(),                                                                                                                                     
+              ];                                                                                                                                                                   
+          } catch (Throwable $throwable) {                                                                                                                                         
+              // 5. 手动回滚                                                                                                                                                       
+              Db::rollBack();                                                                                                                                                      
+                                                                                                                                                                                   
+              throw $throwable;                                                                                                                                                    
+          }                                                                                                                                                                        
+      }                                                                                                                                                                            
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## app/Controller/TransactionManualRollbackDemoController.php                                                                                                                    
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  namespace App\Controller;                                                                                                                                                        
+                                                                                                                                                                                   
+  use App\Service\TransactionManualRollbackDemoService;                                                                                                                            
+  use Hyperf\HttpServer\Annotation\Controller;                                                                                                                                     
+  use Hyperf\HttpServer\Annotation\PostMapping;                                                                                                                                    
+                                                                                                                                                                                   
+  #[Controller(prefix: 'transaction-manual-rollback')]                                                                                                                             
+  class TransactionManualRollbackDemoController                                                                                                                                    
+  {                                                                                                                                                                                
+      public function __construct(                                                                                                                                                 
+          protected TransactionManualRollbackDemoService $service                                                                                                                  
+      ) {                                                                                                                                                                          
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      #[PostMapping('test')]                                                                                                                                                       
+      public function test(): array                                                                                                                                                
+      {                                                                                                                                                                            
+          return $this->service->createOrderAndRollback(1001, 1);                                                                                                                  
+      }                                                                                                                                                                            
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 2. BusinessException 回滚版 demo                                                                                                                                               
+                                                                                                                                                                                   
+  这版更贴近企业项目。                                                                                                                                                             
+                                                                                                                                                                                   
+  ## app/Service/TransactionBusinessRollbackDemoService.php                                                                                                                        
+                                                                                                                                                                                   
+  <?php
 
+declare(strict_types=1);
+
+namespace App\Service;
+
+use App\Constants\TransactionErrorCode;
+use App\Exception\BusinessException;
+use App\Exception\TransactionBusinessException;
+use App\Model\DemoTransactionOrder;
+use App\Model\Inventory;
+use Hyperf\DbConnection\Db;
+
+/**
+ * TransactionBusinessException 回滚 Demo
+ */
+class TransactionBusinessRollbackDemoService
+{
+    /**
+     * 执行流程：
+     * 1. 开事务
+     * 2. 创建订单
+     * 3. 查询库存
+     * 4. 库存不足时抛业务异常
+     * 5. 自动回滚事务
+     */
+    public function createOrderAndRollback(int $skuId, int $quantity): array
+    {
+        return Db::transaction(function () use ($skuId, $quantity) {
+            // 1. 创建订单
+            DemoTransactionOrder::query()->create([
+                'order_no' => 'BRB' . date('YmdHis') . mt_rand(1000, 9999),
+                'sku_id' => $skuId,
+                'quantity' => $quantity,
+                'status' => 1,
+                'remark' => 'BusinessException 回滚 Demo',
+            ]);
+
+            // 2. 查询库存并加锁
+            $inventory = Inventory::query()
+                ->where('sku_id', $skuId)
+                ->lockForUpdate()
+                ->first();
+
+            if (! $inventory) {
+                throw new BusinessException(TransactionErrorCode::INVENTORY_NOT_FOUND);
+            }
+
+            // 3. 故意让它回滚
+            if ($inventory->stock < $quantity) {
+                throw new TransactionBusinessException(TransactionErrorCode::STOCK_NOT_ENOUGH);
+            }
+
+            // 你如果想强制演示回滚，也可以直接抛
+            throw new TransactionBusinessException(TransactionErrorCode::STOCK_NOT_ENOUGH);
+
+            // 这段不会执行
+            $inventory->stock -= $quantity;
+            $inventory->save();
+
+            return [
+                'code' => 0,
+                'message' => 'success',
+                'data' => null,
+            ];
+        });
+    }
+}                                                                                                                              
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## app/Controller/TransactionBusinessRollbackDemoController.php                                                                                                                  
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  namespace App\Controller;                                                                                                                                                        
+                                                                                                                                                                                   
+  use App\Service\TransactionBusinessRollbackDemoService;                                                                                                                          
+  use Hyperf\HttpServer\Annotation\Controller;                                                                                                                                     
+  use Hyperf\HttpServer\Annotation\PostMapping;                                                                                                                                    
+                                                                                                                                                                                   
+  #[Controller(prefix: 'transaction-business-rollback')]                                                                                                                           
+  class TransactionBusinessRollbackDemoController                                                                                                                                  
+  {                                                                                                                                                                                
+      public function __construct(                                                                                                                                                 
+          protected TransactionBusinessRollbackDemoService $service                                                                                                                
+      ) {                                                                                                                                                                          
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      #[PostMapping('test')]                                                                                                                                                       
+      public function test(): array                                                                                                                                                
+      {                                                                                                                                                                            
+          return $this->service->createOrderAndRollback(1001, 1);                                                                                                                  
+      }                                                                                                                                                                            
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 两版区别                                                                                                                                                                       
+                                                                                                                                                                                   
+  ## 手动事务版                                                                                                                                                                    
+                                                                                                                                                                                   
+  你自己控制：                                                                                                                                                                     
+                                                                                                                                                                                   
+  - Db::beginTransaction()                                                                                                                                                         
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## BusinessException 自动回滚版                                                                                                                                                  
+                                                                                                                                                                                   
+  你用：                                                                                                                                                                           
+                                                                                                                                                                                   
+  Db::transaction(function () {                                                                                                                                                    
+      throw new BusinessException(...);                                                                                                                                            
+  });                                                                                                                                                                              
+                                                                                                                                                                                   
+  只要抛异常，框架自动回滚。
 
   ### demo 3：库存不足主动抛异常                                                                                                                                                   
                                                                                                                                                                                    
