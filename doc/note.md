@@ -17839,3 +17839,543 @@ class OrderTransactionDemoService
   # 十、一句话总结                                                                                                                                                                 
                                                                                                                                                                                    
   > Context 是 Hyperf 里最适合存“当前请求级共享数据”的地方，比静态变量和单例属性安全得多。
+
+
+
+
+
+
+我直接给你一套 “Hyperf 请求生命周期 + 协程生命周期” 学习型 Demo，适合你边跑边理解。                                   
+                                                                                                                        
+  ———                                                                                                                   
+                                                                                                                        
+  # 一、先理解两个核心概念                                                                                              
+                                                                                                                        
+  ## 1）请求生命周期                                                                                                    
+                                                                                                                        
+  指的是：                                                                                                              
+                                                                                                                        
+  一个 HTTP 请求从进入应用，到返回响应，这一路经历了什么。                                                              
+                                                                                                                        
+  大致顺序：                                                                                                            
+                                                                                                                        
+  客户端请求                                                                                                            
+  -> 路由匹配                                                                                                           
+  -> 中间件 before                                                                                                      
+  -> Controller                                                                                                         
+  -> Service                                                                                                            
+  -> 中间件 after                                                                                                       
+  -> 返回响应                                                                                                           
+                                                                                                                        
+  ———                                                                                                                   
+                                                                                                                        
+  ## 2）协程生命周期                                                                                                    
+                                                                                                                        
+  指的是：                                                                                                              
+                                                                                                                        
+  这个请求在 Worker 进程里，是以一个协程的形式被执行的。                                                                
+                                                                                                                        
+  也就是：                                                                                                              
+                                                                                                                        
+  - 每个请求通常对应一个协程                                                                                            
+  - 协程里有自己的 Context                                                                                              
+  - 协程结束后，请求级数据应该销毁                                                                                      
+  - 但 Worker 进程不会销毁，会常驻内存                                                                                  
+                                                                                                                        
+  ———                                                                                                                   
+                                                                                                                        
+  # 二、你要重点学会什么                                                                                                
+                                                                                                                        
+  你真正要熟悉的是这 5 个点：                                                                                           
+                                                                                                                        
+  ## 1. 请求数据放哪里                                                                                                  
+                                                                                                                        
+  应该放：                                                                                                              
+                                                                                                                        
+  - Request                                                                                                             
+  - Context                                                                                                             
+                                                                                                                        
+  不应该放：                                                                                                            
+                                                                                                                        
+  - Controller 属性里长期缓存                                                                                           
+  - Service 单例属性里保存请求态数据                                                                                    
+  - static 静态变量里保存用户请求数据                                                                                   
+                                                                                                                        
+  ———                                                                                                                   
+                                                                                                                        
+  ## 2. 协程隔离是什么                                                                                                  
+                                                                                                                        
+  同一时刻多个请求进入：                                                                                                
+                                                                                                                        
+  - 协程 A 的数据                                                                                                       
+  - 协程 B 的数据                                                                                                       
+                                                                                                                        
+  应该互不影响。                                                                                                        
+                                                                                                                        
+  ———                                                                                                                   
+                                                                                                                        
+  ## 3. Worker 常驻内存是什么                                                                                           
+                                                                                                                        
+  请求结束了：                                                                                                          
+                                                                                                                        
+  - 请求没了                                                                                                            
+  - 协程结束了                                                                                                          
+                                                                                                                        
+  但是：                                                                                                                
+                                                                                                                        
+  - Worker 还在                                                                                                         
+  - 单例对象还在                                                                                                        
+  - static 变量可能还在                                                                                                 
+                                                                                                                        
+  这就是很多“串数据”的根源。                                                                                            
+                                                                                                                        
+  ———                                                                                                                   
+                                                                                                                        
+  ## 4. Context 为什么重要                                                                                              
+                                                                                                                        
+  Hyperf\Context\Context 是 协程级上下文。                                                                              
+                                                                                                                        
+  适合存：                                                                                                              
+                                                                                                                        
+  - request_id                                                                                                          
+  - user_id                                                                                                             
+  - trace_id                                                                                                            
+  - 当前请求的临时共享数据                                                                                              
+                                                                                                                        
+  ———                                                                                                                   
+                                                                                                                        
+  ## 5. 中间件 / Controller / Service 在生命周期里怎么串起来                                                            
+                                                                                                                        
+  要理解：                                                                                                              
+                                                                                                                        
+  - 中间件前置                                                                                                          
+  - 进入控制器                                                                                                          
+  - 调用服务                                                                                                            
+  - 服务里读写 Context                                                                                                  
+  - 返回后再经过中间件后置                                                                                              
+                                                                                                                        
+  ———                                                                                                                   
+                                                                                                                        
+  # 三、最适合入门的 Demo 结构                                                                                          
+                                                                                                                        
+  建议你建这几个文件：                                                                                                  
+                                                                                                                        
+  app/                                                                                                                  
+  ├── Controller/                                                                                                       
+  │   └── RequestLifecycleDemoController.php                                                                            
+  ├── Middleware/                                                                                                       
+  │   └── RequestLifecycleDemoMiddleware.php                                                                            
+  ├── Service/                                                                                                          
+  │   └── RequestLifecycleDemoService.php                                                                               
+                                                                                                                        
+  ———                                                                                                                   
+                                                                                                                        
+  # 四、Demo 代码（终端显示版）                                                                                         
+                                                                                                                        
+  ———                                                                                                                   
+                                                                                                                        
+  ## 1）中间件：RequestLifecycleDemoMiddleware.php                                                                      
+                                                                                                                        
+  <?php                                                                                                                 
+                                                                                                                        
+  declare(strict_types=1);                                                                                              
+                                                                                                                        
+  namespace App\Middleware;                                                                                             
+                                                                                                                        
+  use Hyperf\Context\Context;                                                                                           
+  use Hyperf\HttpServer\Contract\RequestInterface;                                                                      
+  use Hyperf\Coroutine\Coroutine;                                                                                       
+  use Psr\Container\ContainerInterface;                                                                                 
+  use Psr\Http\Message\ResponseInterface;                                                                               
+  use Psr\Http\Server\MiddlewareInterface;                                                                              
+  use Psr\Http\Server\RequestHandlerInterface;                                                                          
+                                                                                                                        
+  class RequestLifecycleDemoMiddleware implements MiddlewareInterface                                                   
+  {                                                                                                                     
+      public function __construct(                                                                                      
+          protected ContainerInterface $container,                                                                      
+          protected RequestInterface $request                                                                           
+      ) {                                                                                                               
+      }                                                                                                                 
+                                                                                                                        
+      public function process(\Psr\Http\Message\ServerRequestInterface $request, RequestHandlerInterface $handler):     
+  ResponseInterface                                                                                                     
+      {                                                                                                                 
+          // 当前协程 ID                                                                                                
+          $cid = Coroutine::id();                                                                                       
+                                                                                                                        
+          // 模拟 request_id                                                                                            
+          $requestId = uniqid('req_', true);                                                                            
+                                                                                                                        
+          // 放入协程上下文                                                                                             
+          Context::set('request_id', $requestId);                                                                       
+          Context::set('middleware_start_time', microtime(true));                                                       
+                                                                                                                        
+          var_dump('Middleware before');                                                                                
+          var_dump([                                                                                                    
+              'cid' => $cid,                                                                                            
+              'request_id' => $requestId,                                                                               
+              'path' => $this->request->path(),                                                                         
+          ]);                                                                                                           
+                                                                                                                        
+          $response = $handler->handle($request);                                                                       
+                                                                                                                        
+          $cost = round((microtime(true) - Context::get('middleware_start_time')) * 1000, 2);                           
+                                                                                                                        
+          var_dump('Middleware after');                                                                                 
+          var_dump([                                                                                                    
+              'cid' => $cid,                                                                                            
+              'request_id' => Context::get('request_id'),                                                               
+              'cost_ms' => $cost,                                                                                       
+          ]);                                                                                                           
+                                                                                                                        
+          return $response;                                                                                             
+      }                                                                                                                 
+  }                                                                                                                     
+                                                                                                                        
+  ———                                                                                                                   
+                                                                                                                        
+  ## 2）Service：RequestLifecycleDemoService.php                                                                        
+                                                                                                                        
+  <?php                                                                                                                 
+                                                                                                                        
+  declare(strict_types=1);                                                                                              
+                                                                                                                        
+  namespace App\Service;                                                                                                
+                                                                                                                        
+  use Hyperf\Context\Context;                                                                                           
+  use Hyperf\Coroutine\Coroutine;                                                                                       
+                                                                                                                        
+  class RequestLifecycleDemoService                                                                                     
+  {                                                                                                                     
+      public function handle(): array                                                                                   
+      {                                                                                                                 
+          $cid = Coroutine::id();                                                                                       
+          $requestId = Context::get('request_id');                                                                      
+                                                                                                                        
+          var_dump('Service start');                                                                                    
+          var_dump([                                                                                                    
+              'cid' => $cid,                                                                                            
+              'request_id' => $requestId,                                                                               
+          ]);                                                                                                           
+                                                                                                                        
+          // 模拟业务处理中写入协程上下文                                                                               
+          Context::set('current_user_id', 1001);                                                                        
+                                                                                                                        
+          // 模拟 IO 场景                                                                                               
+          co::sleep(0.2);                                                                                               
+                                                                                                                        
+          var_dump('Service end');                                                                                      
+          var_dump([                                                                                                    
+              'cid' => $cid,                                                                                            
+              'request_id' => Context::get('request_id'),                                                               
+              'current_user_id' => Context::get('current_user_id'),                                                     
+          ]);                                                                                                           
+                                                                                                                        
+          return [                                                                                                      
+              'cid' => $cid,                                                                                            
+              'request_id' => $requestId,                                                                               
+              'current_user_id' => Context::get('current_user_id'),                                                     
+          ];                                                                                                            
+      }                                                                                                                 
+  }                                                                                                                     
+                                                                                                                        
+  ———                                                                                                                   
+                                                                                                                        
+  ## 3）Controller：RequestLifecycleDemoController.php                                                                  
+                                                                                                                        
+  <?php                                                                                                                 
+                                                                                                                        
+  declare(strict_types=1);                                                                                              
+                                                                                                                        
+  namespace App\Controller;                                                                                             
+                                                                                                                        
+  use App\Service\RequestLifecycleDemoService;                                                                          
+  use Hyperf\Context\Context;                                                                                           
+  use Hyperf\Coroutine\Coroutine;                                                                                       
+  use Hyperf\HttpServer\Annotation\Controller;                                                                          
+  use Hyperf\HttpServer\Annotation\GetMapping;                                                                          
+                                                                                                                        
+  #[Controller(prefix: 'lifecycle')]                                                                                    
+  class RequestLifecycleDemoController                                                                                  
+  {                                                                                                                     
+      public function __construct(                                                                                      
+          protected RequestLifecycleDemoService $service                                                                
+      ) {                                                                                                               
+      }                                                                                                                 
+                                                                                                                        
+      #[GetMapping('request')]                                                                                          
+      public function request(): array                                                                                  
+      {                                                                                                                 
+          $cid = Coroutine::id();                                                                                       
+                                                                                                                        
+          var_dump('Controller start');                                                                                 
+          var_dump([                                                                                                    
+              'cid' => $cid,                                                                                            
+              'request_id' => Context::get('request_id'),                                                               
+          ]);                                                                                                           
+                                                                                                                        
+          $data = $this->service->handle();                                                                             
+                                                                                                                        
+          var_dump('Controller end');                                                                                   
+          var_dump([                                                                                                    
+              'cid' => $cid,                                                                                            
+              'request_id' => Context::get('request_id'),                                                               
+          ]);                                                                                                           
+                                                                                                                        
+          return [                                                                                                      
+              'code' => 0,                                                                                              
+              'message' => 'success',                                                                                   
+              'data' => $data,                                                                                          
+          ];                                                                                                            
+      }                                                                                                                 
+  }                                                                                                                     
+                                                                                                                        
+  ———                                                                                                                   
+                                                                                                                        
+  # 五、中间件挂载配置                                                                                                  
+                                                                                                                        
+  文件：                                                                                                                
+                                                                                                                        
+  config/autoload/middlewares.php                                                                                       
+                                                                                                                        
+  示例：                                                                                                                
+                                                                                                                        
+  <?php                                                                                                                 
+                                                                                                                        
+  declare(strict_types=1);                                                                                              
+                                                                                                                        
+  return [                                                                                                              
+      'http' => [                                                                                                       
+          \App\Middleware\RequestLifecycleDemoMiddleware::class,                                                        
+      ],                                                                                                                
+  ];                                                                                                                    
+                                                                                                                        
+  ———                                                                                                                   
+                                                                                                                        
+  # 六、访问接口                                                                                                        
+                                                                                                                        
+  启动：                                                                                                                
+                                                                                                                        
+  php bin/hyperf.php start                                                                                              
+                                                                                                                        
+  访问：                                                                                                                
+                                                                                                                        
+  http://127.0.0.1:9501/lifecycle/request                                                                               
+                                                                                                                        
+  ———                                                                                                                   
+                                                                                                                        
+  # 七、你会在终端看到什么                                                                                              
+                                                                                                                        
+  大概会看到：                                                                                                          
+                                                                                                                        
+  Middleware before                                                                                                     
+  array(3) {                                                                                                            
+    ["cid"]=> int(123)                                                                                                  
+    ["request_id"]=> string(27) "req_6816..."                                                                           
+    ["path"]=> string(17) "/lifecycle/request"                                                                          
+  }                                                                                                                     
+                                                                                                                        
+  Controller start                                                                                                      
+  array(2) {                                                                                                            
+    ["cid"]=> int(123)                                                                                                  
+    ["request_id"]=> string(27) "req_6816..."                                                                           
+  }                                                                                                                     
+                                                                                                                        
+  Service start                                                                                                         
+  array(2) {                                                                                                            
+    ["cid"]=> int(123)                                                                                                  
+    ["request_id"]=> string(27) "req_6816..."                                                                           
+  }                                                                                                                     
+                                                                                                                        
+  Service end                                                                                                           
+  array(3) {                                                                                                            
+    ["cid"]=> int(123)                                                                                                  
+    ["request_id"]=> string(27) "req_6816..."                                                                           
+    ["current_user_id"]=> int(1001)                                                                                     
+  }                                                                                                                     
+                                                                                                                        
+  Controller end                                                                                                        
+  array(2) {                                                                                                            
+    ["cid"]=> int(123)                                                                                                  
+    ["request_id"]=> string(27) "req_6816..."                                                                           
+  }                                                                                                                     
+                                                                                                                        
+  Middleware after                                                                                                      
+  array(3) {                                                                                                            
+    ["cid"]=> int(123)                                                                                                  
+    ["request_id"]=> string(27) "req_6816..."                                                                           
+    ["cost_ms"]=> float(201.22)                                                                                         
+  }                                                                                                                     
+                                                                                                                        
+  ———                                                                                                                   
+                                                                                                                        
+  # 八、你通过这个 Demo 能学会什么                                                                                      
+                                                                                                                        
+  ## 1）同一个请求里，cid 是一样的                                                                                      
+                                                                                                                        
+  说明：                                                                                                                
+                                                                                                                        
+  - 中间件                                                                                                              
+  - Controller                                                                                                          
+  - Service                                                                                                             
+                                                                                                                        
+  都跑在同一个请求协程里。                                                                                              
+                                                                                                                        
+  ———                                                                                                                   
+                                                                                                                        
+  ## 2）Context 可以贯穿整个请求                                                                                        
+                                                                                                                        
+  说明：                                                                                                                
+                                                                                                                        
+  Context::set('request_id', $requestId);                                                                               
+                                                                                                                        
+  在中间件里写入后，Controller 和 Service 都能读取。                                                                    
+                                                                                                                        
+  ———                                                                                                                   
+                                                                                                                        
+  ## 3）请求结束后，协程结束                                                                                            
+                                                                                                                        
+  这个请求的 Context 不应该再给下一个请求用。                                                                           
+                                                                                                                        
+  ———                                                                                                                   
+                                                                                                                        
+  # 九、再做一个“并发请求观察协程隔离”实验                                                                              
+                                                                                                                        
+  你可以连续快速请求两次，或者压测：                                                                                    
+                                                                                                                        
+  ab -n 5 -c 2 http://127.0.0.1:9501/lifecycle/request                                                                  
+                                                                                                                        
+  你会发现：                                                                                                            
+                                                                                                                        
+  - 不同请求 cid 不一样                                                                                                 
+  - 不同请求 request_id 不一样                                                                                          
+  - 各自 Context 不串                                                                                                   
+                                                                                                                        
+  这就是 协程隔离。                                                                                                     
+                                                                                                                        
+  ———                                                                                                                   
+                                                                                                                        
+  # 十、再做一个“错误示范”帮助你理解常驻内存风险                                                                        
+                                                                                                                        
+  ## 错误 Service 写法                                                                                                  
+                                                                                                                        
+  <?php                                                                                                                 
+                                                                                                                        
+  declare(strict_types=1);                                                                                              
+                                                                                                                        
+  namespace App\Service;                                                                                                
+                                                                                                                        
+  class BadDemoService                                                                                                  
+  {                                                                                                                     
+      protected ?int $currentUserId = null;                                                                             
+                                                                                                                        
+      public function setUserId(int $userId): void                                                                      
+      {                                                                                                                 
+          $this->currentUserId = $userId;                                                                               
+      }                                                                                                                 
+                                                                                                                        
+      public function getUserId(): ?int                                                                                 
+      {                                                                                                                 
+          return $this->currentUserId;                                                                                  
+      }                                                                                                                 
+  }                                                                                                                     
+                                                                                                                        
+  问题：                                                                                                                
+                                                                                                                        
+  如果这个 Service 是容器单例，Worker 常驻内存下：                                                                      
+                                                                                                                        
+  - 请求 A 设置了 1001                                                                                                  
+  - 请求 B 可能读到旧值                                                                                                 
+                                                                                                                        
+  这就是典型的 请求数据污染。                                                                                           
+                                                                                                                        
+  ———                                                                                                                   
+                                                                                                                        
+  # 十一、正确姿势                                                                                                      
+                                                                                                                        
+  请求态数据应该这样放：                                                                                                
+                                                                                                                        
+  Context::set('current_user_id', 1001);                                                                                
+  $userId = Context::get('current_user_id');                                                                            
+                                                                                                                        
+  而不是：                                                                                                              
+                                                                                                                        
+  $this->currentUserId = 1001;                                                                                          
+                                                                                                                        
+  ———                                                                                                                   
+                                                                                                                        
+  # 十二、最推荐的学习顺序                                                                                              
+                                                                                                                        
+  你可以按这个顺序练：                                                                                                  
+                                                                                                                        
+  ## 第 1 步：先看请求链路                                                                                              
+                                                                                                                        
+  只看：                                                                                                                
+                                                                                                                        
+  - Middleware before                                                                                                   
+  - Controller                                                                                                          
+  - Service                                                                                                             
+  - Middleware after                                                                                                    
+                                                                                                                        
+  理解请求流程。                                                                                                        
+                                                                                                                        
+  ———                                                                                                                   
+                                                                                                                        
+  ## 第 2 步：再看协程 ID                                                                                               
+                                                                                                                        
+  打印：                                                                                                                
+                                                                                                                        
+  Coroutine::id()                                                                                                       
+                                                                                                                        
+  理解同请求同协程、不同请求不同协程。                                                                                  
+                                                                                                                        
+  ———                                                                                                                   
+                                                                                                                        
+  ## 第 3 步：再练 Context                                                                                              
+                                                                                                                        
+  练习：                                                                                                                
+                                                                                                                        
+  - 中间件写                                                                                                            
+  - Controller 读                                                                                                       
+  - Service 改                                                                                                          
+  - Controller 再读                                                                                                     
+                                                                                                                        
+  理解协程上下文共享。                                                                                                  
+                                                                                                                        
+  ———                                                                                                                   
+                                                                                                                        
+  ## 第 4 步：再看常驻内存风险                                                                                          
+                                                                                                                        
+  故意写一个错误单例属性缓存 Demo，观察串数据风险。                                                                     
+                                                                                                                        
+  ———                                                                                                                   
+                                                                                                                        
+  ## 第 5 步：最后学源码/底层                                                                                           
+                                                                                                                        
+  再去理解：                                                                                                            
+                                                                                                                        
+  - Swoole Worker                                                                                                       
+  - 协程调度                                                                                                            
+  - Hyperf DI 容器                                                                                                      
+  - 请求对象注入                                                                                                        
+  - Context 底层绑定协程 ID                                                                                             
+                                                                                                                        
+  ———                                                                                                                   
+                                                                                                                        
+  # 十三、一句话记忆                                                                                                    
+                                                                                                                        
+  你可以先记住这句：                                                                                                    
+                                                                                                                        
+  > Hyperf 中，一个 HTTP 请求通常运行在一个协程里；请求态数据放 Context，不要放常驻对象属性里。                         
+                                                                                                                        
+  ———                                                                                                                   
+                                                                                                                        
+  # 十四、如果你想真正学会                                                                                              
+                                                                                                                        
+  我建议你接下来继续做这 4 个 demo：                                                                                    
+                                                                                                                        
+  1. 请求生命周期日志版 demo                                                                                            
+  2. 协程 Context 实战 demo                                                                                             
+  3. 错误单例串数据 demo                                                                                                
+  4. 并发请求隔离实验 demo
