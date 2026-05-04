@@ -18379,3 +18379,552 @@ class OrderTransactionDemoService
   2. 协程 Context 实战 demo                                                                                             
   3. 错误单例串数据 demo                                                                                                
   4. 并发请求隔离实验 demo
+
+# 一、请求生命周期日志版 demo                                                                                                                                                    
+                                                                                                                                                                                   
+  ## 1）app/Middleware/RequestLifecycleLogMiddleware.php                                                                                                                           
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  namespace App\Middleware;                                                                                                                                                        
+                                                                                                                                                                                   
+  use Hyperf\Context\Context;                                                                                                                                                      
+  use Hyperf\Coroutine\Coroutine;                                                                                                                                                  
+  use Hyperf\HttpServer\Contract\RequestInterface;                                                                                                                                 
+  use Psr\Http\Message\ResponseInterface;                                                                                                                                          
+  use Psr\Http\Server\MiddlewareInterface;                                                                                                                                         
+  use Psr\Http\Server\RequestHandlerInterface;                                                                                                                                     
+                                                                                                                                                                                   
+  class RequestLifecycleLogMiddleware implements MiddlewareInterface                                                                                                               
+  {                                                                                                                                                                                
+      public function __construct(                                                                                                                                                 
+          protected RequestInterface $request                                                                                                                                      
+      ) {                                                                                                                                                                          
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      public function process(\Psr\Http\Message\ServerRequestInterface $request, RequestHandlerInterface $handler):                                                                
+  ResponseInterface                                                                                                                                                                
+      {                                                                                                                                                                            
+          // 当前请求协程 ID                                                                                                                                                       
+          $cid = Coroutine::id();                                                                                                                                                  
+                                                                                                                                                                                   
+          // 生成请求唯一标识                                                                                                                                                      
+          $requestId = uniqid('req_', true);                                                                                                                                       
+                                                                                                                                                                                   
+          // 放入协程上下文，供后续 Controller / Service 共用                                                                                                                      
+          Context::set('request_id', $requestId);                                                                                                                                  
+          Context::set('request_start_time', microtime(true));                                                                                                                     
+                                                                                                                                                                                   
+          var_dump('=== Middleware before ===');                                                                                                                                   
+          var_dump([                                                                                                                                                               
+              'cid' => $cid,                                                                                                                                                       
+              'request_id' => $requestId,                                                                                                                                          
+              'method' => $this->request->getMethod(),                                                                                                                             
+              'path' => $this->request->path(),                                                                                                                                    
+          ]);                                                                                                                                                                      
+                                                                                                                                                                                   
+          $response = $handler->handle($request);                                                                                                                                  
+                                                                                                                                                                                   
+          $cost = round((microtime(true) - (float) Context::get('request_start_time', microtime(true))) * 1000, 2);                                                                
+                                                                                                                                                                                   
+          var_dump('=== Middleware after ===');                                                                                                                                    
+          var_dump([                                                                                                                                                               
+              'cid' => $cid,                                                                                                                                                       
+              'request_id' => Context::get('request_id'),                                                                                                                          
+              'cost_ms' => $cost,                                                                                                                                                  
+          ]);                                                                                                                                                                      
+                                                                                                                                                                                   
+          return $response;                                                                                                                                                        
+      }                                                                                                                                                                            
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 2）app/Service/RequestLifecycleLogService.php                                                                                                                                 
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  namespace App\Service;                                                                                                                                                           
+                                                                                                                                                                                   
+  use Hyperf\Context\Context;                                                                                                                                                      
+  use Hyperf\Coroutine\Coroutine;                                                                                                                                                  
+                                                                                                                                                                                   
+  class RequestLifecycleLogService                                                                                                                                                 
+  {                                                                                                                                                                                
+      public function handle(): array                                                                                                                                              
+      {                                                                                                                                                                            
+          $cid = Coroutine::id();                                                                                                                                                  
+          $requestId = Context::get('request_id');                                                                                                                                 
+                                                                                                                                                                                   
+          var_dump('=== Service start ===');                                                                                                                                       
+          var_dump([                                                                                                                                                               
+              'cid' => $cid,                                                                                                                                                       
+              'request_id' => $requestId,                                                                                                                                          
+          ]);                                                                                                                                                                      
+                                                                                                                                                                                   
+          // 模拟业务处理                                                                                                                                                          
+          Coroutine::sleep(0.2);                                                                                                                                                   
+                                                                                                                                                                                   
+          var_dump('=== Service end ===');                                                                                                                                         
+          var_dump([                                                                                                                                                               
+              'cid' => $cid,                                                                                                                                                       
+              'request_id' => $requestId,                                                                                                                                          
+          ]);                                                                                                                                                                      
+                                                                                                                                                                                   
+          return [                                                                                                                                                                 
+              'cid' => $cid,                                                                                                                                                       
+              'request_id' => $requestId,                                                                                                                                          
+              'message' => 'service done',                                                                                                                                         
+          ];                                                                                                                                                                       
+      }                                                                                                                                                                            
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 3）app/Controller/RequestLifecycleLogController.php                                                                                                                           
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  namespace App\Controller;                                                                                                                                                        
+                                                                                                                                                                                   
+  use App\Service\RequestLifecycleLogService;                                                                                                                                      
+  use Hyperf\Context\Context;                                                                                                                                                      
+  use Hyperf\Coroutine\Coroutine;                                                                                                                                                  
+  use Hyperf\HttpServer\Annotation\Controller;                                                                                                                                     
+  use Hyperf\HttpServer\Annotation\GetMapping;                                                                                                                                     
+                                                                                                                                                                                   
+  #[Controller(prefix: 'lifecycle')]                                                                                                                                               
+  class RequestLifecycleLogController                                                                                                                                              
+  {                                                                                                                                                                                
+      public function __construct(                                                                                                                                                 
+          protected RequestLifecycleLogService $service                                                                                                                            
+      ) {                                                                                                                                                                          
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      #[GetMapping('request-log')]                                                                                                                                                 
+      public function index(): array                                                                                                                                               
+      {                                                                                                                                                                            
+          $cid = Coroutine::id();                                                                                                                                                  
+                                                                                                                                                                                   
+          var_dump('=== Controller start ===');                                                                                                                                    
+          var_dump([                                                                                                                                                               
+              'cid' => $cid,                                                                                                                                                       
+              'request_id' => Context::get('request_id'),                                                                                                                          
+          ]);                                                                                                                                                                      
+                                                                                                                                                                                   
+          $data = $this->service->handle();                                                                                                                                        
+                                                                                                                                                                                   
+          var_dump('=== Controller end ===');                                                                                                                                      
+          var_dump([                                                                                                                                                               
+              'cid' => $cid,                                                                                                                                                       
+              'request_id' => Context::get('request_id'),                                                                                                                          
+          ]);                                                                                                                                                                      
+                                                                                                                                                                                   
+          return [                                                                                                                                                                 
+              'code' => 0,                                                                                                                                                         
+              'message' => 'success',                                                                                                                                              
+              'data' => $data,                                                                                                                                                     
+          ];                                                                                                                                                                       
+      }                                                                                                                                                                            
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 4）config/autoload/middlewares.php                                                                                                                                            
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  return [                                                                                                                                                                         
+      'http' => [                                                                                                                                                                  
+          \App\Middleware\RequestLifecycleLogMiddleware::class,                                                                                                                    
+      ],                                                                                                                                                                           
+  ];                                                                                                                                                                               
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 5）访问                                                                                                                                                                       
+                                                                                                                                                                                   
+  http://127.0.0.1:9501/lifecycle/request-log                                                                                                                                      
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 二、协程 Context 实战 demo                                                                                                                                                     
+                                                                                                                                                                                   
+  ## 1）app/Service/ContextDemoService.php                                                                                                                                         
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  namespace App\Service;                                                                                                                                                           
+                                                                                                                                                                                   
+  use Hyperf\Context\Context;                                                                                                                                                      
+  use Hyperf\Coroutine\Coroutine;                                                                                                                                                  
+                                                                                                                                                                                   
+  class ContextDemoService                                                                                                                                                         
+  {                                                                                                                                                                                
+      public function setUserContext(int $userId): void                                                                                                                            
+      {                                                                                                                                                                            
+          // 把当前用户 ID 放入协程上下文                                                                                                                                          
+          Context::set('current_user_id', $userId);                                                                                                                                
+                                                                                                                                                                                   
+          var_dump('=== ContextDemoService::setUserContext ===');                                                                                                                  
+          var_dump([                                                                                                                                                               
+              'cid' => Coroutine::id(),                                                                                                                                            
+              'current_user_id' => Context::get('current_user_id'),                                                                                                                
+          ]);                                                                                                                                                                      
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      public function getUserContext(): array                                                                                                                                      
+      {                                                                                                                                                                            
+          return [                                                                                                                                                                 
+              'cid' => Coroutine::id(),                                                                                                                                            
+              'request_id' => Context::get('request_id'),                                                                                                                          
+              'current_user_id' => Context::get('current_user_id'),                                                                                                                
+          ];                                                                                                                                                                       
+      }                                                                                                                                                                            
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 2）app/Controller/ContextDemoController.php                                                                                                                                   
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  namespace App\Controller;                                                                                                                                                        
+                                                                                                                                                                                   
+  use App\Service\ContextDemoService;                                                                                                                                              
+  use Hyperf\Context\Context;                                                                                                                                                      
+  use Hyperf\HttpServer\Annotation\Controller;                                                                                                                                     
+  use Hyperf\HttpServer\Annotation\GetMapping;                                                                                                                                     
+                                                                                                                                                                                   
+  #[Controller(prefix: 'context-demo')]                                                                                                                                            
+  class ContextDemoController                                                                                                                                                      
+  {                                                                                                                                                                                
+      public function __construct(                                                                                                                                                 
+          protected ContextDemoService $service                                                                                                                                    
+      ) {                                                                                                                                                                          
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      #[GetMapping('test')]                                                                                                                                                        
+      public function test(): array                                                                                                                                                
+      {                                                                                                                                                                            
+          // 模拟登录用户                                                                                                                                                          
+          $this->service->setUserContext(1001);                                                                                                                                    
+                                                                                                                                                                                   
+          $data = $this->service->getUserContext();                                                                                                                                
+                                                                                                                                                                                   
+          return [                                                                                                                                                                 
+              'code' => 0,                                                                                                                                                         
+              'message' => 'success',                                                                                                                                              
+              'data' => [                                                                                                                                                          
+                  'request_id' => Context::get('request_id'),                                                                                                                      
+                  'context' => $data,                                                                                                                                              
+              ],                                                                                                                                                                   
+          ];                                                                                                                                                                       
+      }                                                                                                                                                                            
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 3）访问                                                                                                                                                                       
+                                                                                                                                                                                   
+  http://127.0.0.1:9501/context-demo/test                                                                                                                                          
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 4）你会观察到                                                                                                                                                                 
+                                                                                                                                                                                   
+  - 中间件里写入 request_id                                                                                                                                                        
+  - Service 里写入 current_user_id                                                                                                                                                 
+  - Controller / Service 都能读到                                                                                                                                                  
+  - 同一个请求里 Context 共享                                                                                                                                                      
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 三、错误单例串数据 demo                                                                                                                                                        
+                                                                                                                                                                                   
+  这个 demo 专门让你理解：                                                                                                                                                         
+                                                                                                                                                                                   
+  > 为什么请求态数据不能放到常驻对象属性里                                                                                                                                         
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 1）错误版：app/Service/BadSingletonDemoService.php                                                                                                                            
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  namespace App\Service;                                                                                                                                                           
+                                                                                                                                                                                   
+  class BadSingletonDemoService                                                                                                                                                    
+  {                                                                                                                                                                                
+      /**                                                                                                                                                                          
+       * 错误示范：                                                                                                                                                                
+       * 这个属性如果挂在常驻对象上，可能被不同请求共用                                                                                                                            
+       */                                                                                                                                                                          
+      protected ?int $currentUserId = null;                                                                                                                                        
+                                                                                                                                                                                   
+      public function setCurrentUserId(int $userId): void                                                                                                                          
+      {                                                                                                                                                                            
+          $this->currentUserId = $userId;                                                                                                                                          
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      public function getCurrentUserId(): ?int                                                                                                                                     
+      {                                                                                                                                                                            
+          return $this->currentUserId;                                                                                                                                             
+      }                                                                                                                                                                            
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 2）app/Controller/BadSingletonDemoController.php                                                                                                                              
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  namespace App\Controller;                                                                                                                                                        
+                                                                                                                                                                                   
+  use App\Service\BadSingletonDemoService;                                                                                                                                         
+  use Hyperf\HttpServer\Annotation\Controller;                                                                                                                                     
+  use Hyperf\HttpServer\Annotation\GetMapping;                                                                                                                                     
+  use Hyperf\HttpServer\Contract\RequestInterface;                                                                                                                                 
+                                                                                                                                                                                   
+  #[Controller(prefix: 'bad-singleton')]                                                                                                                                           
+  class BadSingletonDemoController                                                                                                                                                 
+  {                                                                                                                                                                                
+      public function __construct(                                                                                                                                                 
+          protected BadSingletonDemoService $service,                                                                                                                              
+          protected RequestInterface $request                                                                                                                                      
+      ) {                                                                                                                                                                          
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      #[GetMapping('set')]                                                                                                                                                         
+      public function set(): array                                                                                                                                                 
+      {                                                                                                                                                                            
+          $userId = (int) $this->request->input('user_id', 0);                                                                                                                     
+                                                                                                                                                                                   
+          $this->service->setCurrentUserId($userId);                                                                                                                               
+                                                                                                                                                                                   
+          return [                                                                                                                                                                 
+              'code' => 0,                                                                                                                                                         
+              'message' => 'set success',                                                                                                                                          
+              'data' => [                                                                                                                                                          
+                  'set_user_id' => $userId,                                                                                                                                        
+                  'service_current_user_id' => $this->service->getCurrentUserId(),                                                                                                 
+              ],                                                                                                                                                                   
+          ];                                                                                                                                                                       
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      #[GetMapping('get')]                                                                                                                                                         
+      public function get(): array                                                                                                                                                 
+      {                                                                                                                                                                            
+          return [                                                                                                                                                                 
+              'code' => 0,                                                                                                                                                         
+              'message' => 'get success',                                                                                                                                          
+              'data' => [                                                                                                                                                          
+                  'service_current_user_id' => $this->service->getCurrentUserId(),                                                                                                 
+              ],                                                                                                                                                                   
+          ];                                                                                                                                                                       
+      }                                                                                                                                                                            
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 3）测试方式                                                                                                                                                                   
+                                                                                                                                                                                   
+  先请求：                                                                                                                                                                         
+                                                                                                                                                                                   
+  http://127.0.0.1:9501/bad-singleton/set?user_id=1001                                                                                                                             
+                                                                                                                                                                                   
+  再请求：                                                                                                                                                                         
+                                                                                                                                                                                   
+  http://127.0.0.1:9501/bad-singleton/get                                                                                                                                          
+                                                                                                                                                                                   
+  如果对象是常驻复用的，就可能看到旧值还在。                                                                                                                                       
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 4）这说明什么                                                                                                                                                                 
+                                                                                                                                                                                   
+  说明：                                                                                                                                                                           
+                                                                                                                                                                                   
+  - Worker 常驻内存                                                                                                                                                                
+  - 容器对象可能复用                                                                                                                                                               
+  - 请求态数据不能乱塞进对象属性                                                                                                                                                   
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 四、并发请求隔离实验 demo                                                                                                                                                      
+                                                                                                                                                                                   
+  这个 demo 用来验证：                                                                                                                                                             
+                                                                                                                                                                                   
+  > 不同请求是不同协程，Context 不串数据                                                                                                                                           
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 1）app/Service/ConcurrentIsolationDemoService.php                                                                                                                             
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  namespace App\Service;                                                                                                                                                           
+                                                                                                                                                                                   
+  use Hyperf\Context\Context;                                                                                                                                                      
+  use Hyperf\Coroutine\Coroutine;                                                                                                                                                  
+                                                                                                                                                                                   
+  class ConcurrentIsolationDemoService                                                                                                                                             
+  {                                                                                                                                                                                
+      public function handle(int $userId): array                                                                                                                                   
+      {                                                                                                                                                                            
+          $cid = Coroutine::id();                                                                                                                                                  
+                                                                                                                                                                                   
+          // 每个请求写入自己的用户 ID                                                                                                                                             
+          Context::set('concurrent_user_id', $userId);                                                                                                                             
+                                                                                                                                                                                   
+          var_dump('=== ConcurrentIsolationDemoService start ===');                                                                                                                
+          var_dump([                                                                                                                                                               
+              'cid' => $cid,                                                                                                                                                       
+              'request_id' => Context::get('request_id'),                                                                                                                          
+              'user_id' => $userId,                                                                                                                                                
+          ]);                                                                                                                                                                      
+                                                                                                                                                                                   
+          // 模拟并发下的业务耗时                                                                                                                                                  
+          Coroutine::sleep(1);                                                                                                                                                     
+                                                                                                                                                                                   
+          $result = [                                                                                                                                                              
+              'cid' => $cid,                                                                                                                                                       
+              'request_id' => Context::get('request_id'),                                                                                                                          
+              'user_id' => Context::get('concurrent_user_id'),                                                                                                                     
+          ];                                                                                                                                                                       
+                                                                                                                                                                                   
+          var_dump('=== ConcurrentIsolationDemoService end ===');                                                                                                                  
+          var_dump($result);                                                                                                                                                       
+                                                                                                                                                                                   
+          return $result;                                                                                                                                                          
+      }                                                                                                                                                                            
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 2）app/Controller/ConcurrentIsolationDemoController.php                                                                                                                       
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  namespace App\Controller;                                                                                                                                                        
+                                                                                                                                                                                   
+  use App\Service\ConcurrentIsolationDemoService;                                                                                                                                  
+  use Hyperf\HttpServer\Annotation\Controller;                                                                                                                                     
+  use Hyperf\HttpServer\Annotation\GetMapping;                                                                                                                                     
+  use Hyperf\HttpServer\Contract\RequestInterface;                                                                                                                                 
+                                                                                                                                                                                   
+  #[Controller(prefix: 'concurrent-demo')]                                                                                                                                         
+  class ConcurrentIsolationDemoController                                                                                                                                          
+  {                                                                                                                                                                                
+      public function __construct(                                                                                                                                                 
+          protected ConcurrentIsolationDemoService $service,                                                                                                                       
+          protected RequestInterface $request                                                                                                                                      
+      ) {                                                                                                                                                                          
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      #[GetMapping('test')]                                                                                                                                                        
+      public function test(): array                                                                                                                                                
+      {                                                                                                                                                                            
+          $userId = (int) $this->request->input('user_id', 0);                                                                                                                     
+                                                                                                                                                                                   
+          $data = $this->service->handle($userId);                                                                                                                                 
+                                                                                                                                                                                   
+          return [                                                                                                                                                                 
+              'code' => 0,                                                                                                                                                         
+              'message' => 'success',                                                                                                                                              
+              'data' => $data,                                                                                                                                                     
+          ];                                                                                                                                                                       
+      }                                                                                                                                                                            
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 3）并发测试                                                                                                                                                                   
+                                                                                                                                                                                   
+  浏览器同时开两个：                                                                                                                                                               
+                                                                                                                                                                                   
+  http://127.0.0.1:9501/concurrent-demo/test?user_id=1001                                                                                                                          
+  http://127.0.0.1:9501/concurrent-demo/test?user_id=2002                                                                                                                          
+                                                                                                                                                                                   
+  或者压测：                                                                                                                                                                       
+                                                                                                                                                                                   
+  ab -n 10 -c 2 "http://127.0.0.1:9501/concurrent-demo/test?user_id=1001"                                                                                                          
+                                                                                                                                                                                   
+  你重点看终端输出：                                                                                                                                                               
+                                                                                                                                                                                   
+  - 每个请求 cid 不同                                                                                                                                                              
+  - 每个请求 request_id 不同                                                                                                                                                       
+  - Context::get('concurrent_user_id') 不串                                                                                                                                        
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 五、你应该怎么学这 4 个 demo                                                                                                                                                   
+                                                                                                                                                                                   
+  建议顺序：                                                                                                                                                                       
+                                                                                                                                                                                   
+  ## 第 1 步：先跑请求生命周期日志版                                                                                                                                               
+                                                                                                                                                                                   
+  看清楚：                                                                                                                                                                         
+                                                                                                                                                                                   
+  Middleware before                                                                                                                                                                
+  -> Controller start                                                                                                                                                              
+  -> Service start                                                                                                                                                                 
+  -> Service end                                                                                                                                                                   
+  -> Controller end                                                                                                                                                                
+  -> Middleware after                                                                                                                                                              
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 第 2 步：再跑 Context demo                                                                                                                                                    
+                                                                                                                                                                                   
+  理解：                                                                                                                                                                           
+                                                                                                                                                                                   
+  - 为什么中间件写的 request_id 能在 Service 里读到                                                                                                                                
+  - 为什么 current_user_id 适合放 Context                                                                                                                                          
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 第 3 步：再跑错误单例串数据 demo                                                                                                                                              
+                                                                                                                                                                                   
+  理解：                                                                                                                                                                           
+                                                                                                                                                                                   
+  - 请求数据为什么不能存对象属性                                                                                                                                                   
+  - 常驻内存为什么危险                                                                                                                                                             
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 第 4 步：最后跑并发隔离 demo                                                                                                                                                  
+                                                                                                                                                                                   
+  理解：                                                                                                                                                                           
+                                                                                                                                                                                   
+  - 一个请求一个协程                                                                                                                                                               
+  - 不同请求不同协程                                                                                                                                                               
+  - Context 是协程级隔离                                                                                                                                                           
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 六、一句话总结                                                                                                                                                                 
+                                                                                                                                                                                   
+  你要记住这句：                                                                                                                                                                   
+                                                                                                                                                                                   
+  > Hyperf 里，请求跑在协程里；请求态数据放 Context；不要放常驻对象属性。
