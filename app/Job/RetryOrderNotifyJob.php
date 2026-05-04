@@ -18,18 +18,14 @@ class RetryOrderNotifyJob extends Job
     ) {
     }
 
-    /**
-     * 执行任务
-     */
     public function handle(): void
     {
         var_dump('=== RetryOrderNotifyJob handle ===');
         var_dump([
             'order_no' => $this->orderNo,
-            'attempts' => $this->attempts(),
+            'message' => '模拟通知第三方失败，触发重试',
         ]);
 
-        // 模拟消费失败
         throw new \RuntimeException('模拟通知第三方失败');
     }
 }
