@@ -20451,3 +20451,536 @@ HyPerf 异步队列如果走 RedisDriver，常见会用到这些 Redis 数据类
                                                                                                                                                                                    
   > Hyperf Redis 异步队列，本质上就是：                                                                                                                                            
   > List 做立即队列，ZSet 做延迟/超时/保留队列，元素内容是序列化后的 Job 对象。
+
+
+
+
+
+这个 demo 很贴近企业项目常见场景：                                                                                                                                               
+                                                                                                                                                                                   
+  创建订单                                                                                                                                                                         
+  -> 状态 = 待支付                                                                                                                                                                 
+  -> 投递一个延迟任务（比如 30 分钟后）                                                                                                                                            
+  -> 到时间检查订单是否还没支付                                                                                                                                                    
+  -> 如果还没支付，就自动关闭订单                                                                                                                                                  
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 一、这个 demo 要学什么                                                                                                                                                         
+                                                                                                                                                                                   
+  你会同时学到：                                                                                                                                                                   
+                                                                                                                                                                                   
+  1. 延迟队列怎么用于业务                                                                                                                                                          
+  2. 为什么关闭订单前一定要再次查状态                                                                                                                                              
+  3. 为什么延迟任务不能“到时间就直接关”                                                                                                                                            
+  4. 企业里如何避免误关单                                                                                                                                                          
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 二、建议表结构                                                                                                                                                                 
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 1）订单表 demo_delay_orders                                                                                                                                                   
+                                                                                                                                                                                   
+  DROP TABLE IF EXISTS `demo_delay_orders`;                                                                                                                                        
+                                                                                                                                                                                   
+  CREATE TABLE `demo_delay_orders` (                                                                                                                                               
+    `id` bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '主键ID',                                                                                                                 
+    `order_no` varchar(50) NOT NULL COMMENT '订单号',                                                                                                                              
+    `user_id` bigint unsigned NOT NULL COMMENT '用户ID',                                                                                                                           
+    `amount` decimal(10,2) NOT NULL DEFAULT '0.00' COMMENT '订单金额',                                                                                                             
+    `status` tinyint NOT NULL DEFAULT '1' COMMENT '状态：1待支付 2已支付 3已关闭',                                                                                                 
+    `created_at` datetime DEFAULT NULL COMMENT '创建时间',                                                                                                                         
+    `updated_at` datetime DEFAULT NULL COMMENT '更新时间',                                                                                                                         
+    PRIMARY KEY (`id`),                                                                                                                                                            
+    UNIQUE KEY `uk_order_no` (`order_no`)                                                                                                                                          
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='延迟关闭订单 Demo 表';                                                                                                          
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 2）测试数据                                                                                                                                                                   
+                                                                                                                                                                                   
+  也可以不先插数据，因为我们下面会通过接口创建订单。                                                                                                                               
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 三、Model                                                                                                                                                                      
+                                                                                                                                                                                   
+  文件：app/Model/DemoDelayOrder.php                                                                                                                                               
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  namespace App\Model;                                                                                                                                                             
+                                                                                                                                                                                   
+  use Hyperf\DbConnection\Model\Model;                                                                                                                                             
+                                                                                                                                                                                   
+  /**                                                                                                                                                                              
+   * 延迟关闭订单 Demo 模型                                                                                                                                                        
+   */                                                                                                                                                                              
+  class DemoDelayOrder extends Model                                                                                                                                               
+  {                                                                                                                                                                                
+      protected ?string $table = 'demo_delay_orders';                                                                                                                              
+                                                                                                                                                                                   
+      protected array $fillable = [                                                                                                                                                
+          'order_no',                                                                                                                                                              
+          'user_id',                                                                                                                                                               
+          'amount',                                                                                                                                                                
+          'status',                                                                                                                                                                
+          'created_at',                                                                                                                                                            
+          'updated_at',                                                                                                                                                            
+      ];                                                                                                                                                                           
+                                                                                                                                                                                   
+      protected array $casts = [                                                                                                                                                   
+          'id' => 'integer',                                                                                                                                                       
+          'user_id' => 'integer',                                                                                                                                                  
+          'amount' => 'float',                                                                                                                                                     
+          'status' => 'integer',                                                                                                                                                   
+      ];                                                                                                                                                                           
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 四、延迟关闭订单 Job                                                                                                                                                           
+                                                                                                                                                                                   
+  文件：app/Job/DelayCloseOrderBizJob.php                                                                                                                                          
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  namespace App\Job;                                                                                                                                                               
+                                                                                                                                                                                   
+  use App\Model\DemoDelayOrder;                                                                                                                                                    
+  use Hyperf\AsyncQueue\Job;                                                                                                                                                       
+                                                                                                                                                                                   
+  class DelayCloseOrderBizJob extends Job                                                                                                                                          
+  {                                                                                                                                                                                
+      public function __construct(                                                                                                                                                 
+          public string $orderNo                                                                                                                                                   
+      ) {                                                                                                                                                                          
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      public function handle(): void                                                                                                                                               
+      {                                                                                                                                                                            
+          var_dump('=== DelayCloseOrderBizJob handle ===');                                                                                                                        
+          var_dump([                                                                                                                                                               
+              'order_no' => $this->orderNo,                                                                                                                                        
+              'execute_time' => date('Y-m-d H:i:s'),                                                                                                                               
+          ]);                                                                                                                                                                      
+                                                                                                                                                                                   
+          $order = DemoDelayOrder::query()                                                                                                                                         
+              ->where('order_no', $this->orderNo)                                                                                                                                  
+              ->first();                                                                                                                                                           
+                                                                                                                                                                                   
+          if (! $order) {                                                                                                                                                          
+              var_dump('订单不存在，跳过关闭');                                                                                                                                    
+              return;                                                                                                                                                              
+          }                                                                                                                                                                        
+                                                                                                                                                                                   
+          // 关键点：                                                                                                                                                              
+          // 延迟任务执行时，必须再次检查订单状态                                                                                                                                  
+          // 防止用户已经支付成功，却被错误关闭                                                                                                                                    
+          if ((int) $order->status !== 1) {                                                                                                                                        
+              var_dump('订单状态不是待支付，跳过关闭');                                                                                                                            
+              var_dump([                                                                                                                                                           
+                  'order_no' => $order->order_no,                                                                                                                                  
+                  'status' => $order->status,                                                                                                                                      
+              ]);                                                                                                                                                                  
+              return;                                                                                                                                                              
+          }                                                                                                                                                                        
+                                                                                                                                                                                   
+          $order->status = 3;                                                                                                                                                      
+          $order->save();                                                                                                                                                          
+                                                                                                                                                                                   
+          var_dump('订单超时未支付，已自动关闭');                                                                                                                                  
+          var_dump([                                                                                                                                                               
+              'order_no' => $order->order_no,                                                                                                                                      
+              'status' => $order->status,                                                                                                                                          
+          ]);                                                                                                                                                                      
+      }                                                                                                                                                                            
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 五、Service                                                                                                                                                                    
+                                                                                                                                                                                   
+  文件：app/Service/DelayOrderDemoService.php                                                                                                                                      
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  namespace App\Service;                                                                                                                                                           
+                                                                                                                                                                                   
+  use App\Job\DelayCloseOrderBizJob;                                                                                                                                               
+  use App\Model\DemoDelayOrder;                                                                                                                                                    
+  use Hyperf\AsyncQueue\Driver\DriverFactory;                                                                                                                                      
+                                                                                                                                                                                   
+  class DelayOrderDemoService                                                                                                                                                      
+  {                                                                                                                                                                                
+      public function __construct(                                                                                                                                                 
+          protected DriverFactory $driverFactory                                                                                                                                   
+      ) {                                                                                                                                                                          
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 创建待支付订单，并投递延迟关闭任务                                                                                                                                        
+       */                                                                                                                                                                          
+      public function createOrder(): array                                                                                                                                         
+      {                                                                                                                                                                            
+          $orderNo = 'OD' . date('YmdHis') . mt_rand(1000, 9999);                                                                                                                  
+                                                                                                                                                                                   
+          $order = DemoDelayOrder::query()->create([                                                                                                                               
+              'order_no' => $orderNo,                                                                                                                                              
+              'user_id' => 1001,                                                                                                                                                   
+              'amount' => 99.90,                                                                                                                                                   
+              'status' => 1, // 1=待支付                                                                                                                                           
+          ]);                                                                                                                                                                      
+                                                                                                                                                                                   
+          $driver = $this->driverFactory->get('default');                                                                                                                          
+                                                                                                                                                                                   
+          // Demo 为了方便测试，延迟 15 秒关闭                                                                                                                                     
+          // 企业里通常是 15 分钟 / 30 分钟                                                                                                                                        
+          $driver->push(new DelayCloseOrderBizJob($orderNo), 15);                                                                                                                  
+                                                                                                                                                                                   
+          return [                                                                                                                                                                 
+              'code' => 0,                                                                                                                                                         
+              'message' => '订单创建成功，已投递延迟关闭任务',                                                                                                                     
+              'data' => [                                                                                                                                                          
+                  'id' => $order->id,                                                                                                                                              
+                  'order_no' => $order->order_no,                                                                                                                                  
+                  'status' => $order->status,                                                                                                                                      
+                  'close_after_seconds' => 15,                                                                                                                                     
+              ],                                                                                                                                                                   
+          ];                                                                                                                                                                       
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 模拟支付成功                                                                                                                                                              
+       */                                                                                                                                                                          
+      public function payOrder(string $orderNo): array                                                                                                                             
+      {                                                                                                                                                                            
+          $order = DemoDelayOrder::query()                                                                                                                                         
+              ->where('order_no', $orderNo)                                                                                                                                        
+              ->first();                                                                                                                                                           
+                                                                                                                                                                                   
+          if (! $order) {                                                                                                                                                          
+              return [                                                                                                                                                             
+                  'code' => 404,                                                                                                                                                   
+                  'message' => '订单不存在',                                                                                                                                       
+                  'data' => null,                                                                                                                                                  
+              ];                                                                                                                                                                   
+          }                                                                                                                                                                        
+                                                                                                                                                                                   
+          if ((int) $order->status !== 1) {                                                                                                                                        
+              return [                                                                                                                                                             
+                  'code' => 400,                                                                                                                                                   
+                  'message' => '当前订单不是待支付状态，不能支付',                                                                                                                 
+                  'data' => [                                                                                                                                                      
+                      'order_no' => $order->order_no,                                                                                                                              
+                      'status' => $order->status,                                                                                                                                  
+                  ],                                                                                                                                                               
+              ];                                                                                                                                                                   
+          }                                                                                                                                                                        
+                                                                                                                                                                                   
+          $order->status = 2; // 2=已支付                                                                                                                                          
+          $order->save();                                                                                                                                                          
+                                                                                                                                                                                   
+          return [                                                                                                                                                                 
+              'code' => 0,                                                                                                                                                         
+              'message' => '支付成功',                                                                                                                                             
+              'data' => [                                                                                                                                                          
+                  'order_no' => $order->order_no,                                                                                                                                  
+                  'status' => $order->status,                                                                                                                                      
+              ],                                                                                                                                                                   
+          ];                                                                                                                                                                       
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 查询订单详情                                                                                                                                                              
+       */                                                                                                                                                                          
+      public function detail(string $orderNo): array                                                                                                                               
+      {                                                                                                                                                                            
+          $order = DemoDelayOrder::query()                                                                                                                                         
+              ->where('order_no', $orderNo)                                                                                                                                        
+              ->first();                                                                                                                                                           
+                                                                                                                                                                                   
+          if (! $order) {                                                                                                                                                          
+              return [                                                                                                                                                             
+                  'code' => 404,                                                                                                                                                   
+                  'message' => '订单不存在',                                                                                                                                       
+                  'data' => null,                                                                                                                                                  
+              ];                                                                                                                                                                   
+          }                                                                                                                                                                        
+                                                                                                                                                                                   
+          return [                                                                                                                                                                 
+              'code' => 0,                                                                                                                                                         
+              'message' => 'success',                                                                                                                                              
+              'data' => $order->toArray(),                                                                                                                                         
+          ];                                                                                                                                                                       
+      }                                                                                                                                                                            
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 六、Controller                                                                                                                                                                 
+                                                                                                                                                                                   
+  文件：app/Controller/DelayOrderDemoController.php                                                                                                                                
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  namespace App\Controller;                                                                                                                                                        
+                                                                                                                                                                                   
+  use App\Service\DelayOrderDemoService;                                                                                                                                           
+  use Hyperf\HttpServer\Annotation\Controller;                                                                                                                                     
+  use Hyperf\HttpServer\Annotation\GetMapping;                                                                                                                                     
+  use Hyperf\HttpServer\Contract\RequestInterface;                                                                                                                                 
+                                                                                                                                                                                   
+  #[Controller(prefix: 'delay-order-demo')]                                                                                                                                        
+  class DelayOrderDemoController                                                                                                                                                   
+  {                                                                                                                                                                                
+      public function __construct(                                                                                                                                                 
+          protected DelayOrderDemoService $service,                                                                                                                                
+          protected RequestInterface $request                                                                                                                                      
+      ) {                                                                                                                                                                          
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 创建订单                                                                                                                                                                  
+       */                                                                                                                                                                          
+      #[GetMapping('create')]                                                                                                                                                      
+      public function create(): array                                                                                                                                              
+      {                                                                                                                                                                            
+          return $this->service->createOrder();                                                                                                                                    
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 模拟支付                                                                                                                                                                  
+       * /delay-order-demo/pay?order_no=xxxx                                                                                                                                       
+       */                                                                                                                                                                          
+      #[GetMapping('pay')]                                                                                                                                                         
+      public function pay(): array                                                                                                                                                 
+      {                                                                                                                                                                            
+          $orderNo = (string) $this->request->input('order_no', '');                                                                                                               
+                                                                                                                                                                                   
+          return $this->service->payOrder($orderNo);                                                                                                                               
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 查询详情                                                                                                                                                                  
+       * /delay-order-demo/detail?order_no=xxxx                                                                                                                                    
+       */                                                                                                                                                                          
+      #[GetMapping('detail')]                                                                                                                                                      
+      public function detail(): array                                                                                                                                              
+      {                                                                                                                                                                            
+          $orderNo = (string) $this->request->input('order_no', '');                                                                                                               
+                                                                                                                                                                                   
+          return $this->service->detail($orderNo);                                                                                                                                 
+      }                                                                                                                                                                            
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 七、你怎么测试                                                                                                                                                                 
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 场景 1：不支付，等它自动关闭                                                                                                                                                  
+                                                                                                                                                                                   
+  ### 第 1 步：创建订单                                                                                                                                                            
+                                                                                                                                                                                   
+  请求：                                                                                                                                                                           
+                                                                                                                                                                                   
+  GET /delay-order-demo/create                                                                                                                                                     
+                                                                                                                                                                                   
+  返回：                                                                                                                                                                           
+                                                                                                                                                                                   
+  {                                                                                                                                                                                
+    "code": 0,                                                                                                                                                                     
+    "message": "订单创建成功，已投递延迟关闭任务",                                                                                                                                 
+    "data": {                                                                                                                                                                      
+      "id": 1,                                                                                                                                                                     
+      "order_no": "OD202605041530001234",                                                                                                                                          
+      "status": 1,                                                                                                                                                                 
+      "close_after_seconds": 15                                                                                                                                                    
+    }                                                                                                                                                                              
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ### 第 2 步：等 15 秒                                                                                                                                                            
+                                                                                                                                                                                   
+  终端会看到：                                                                                                                                                                     
+                                                                                                                                                                                   
+  === DelayCloseOrderBizJob handle ===                                                                                                                                             
+  array(2) {                                                                                                                                                                       
+    ["order_no"]=>                                                                                                                                                                 
+    string(20) "OD202605041530001234"                                                                                                                                              
+    ["execute_time"]=>                                                                                                                                                             
+    string(19) "2026-05-04 15:30:15"                                                                                                                                               
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  订单超时未支付，已自动关闭                                                                                                                                                       
+  array(2) {                                                                                                                                                                       
+    ["order_no"]=>                                                                                                                                                                 
+    string(20) "OD202605041530001234"                                                                                                                                              
+    ["status"]=>                                                                                                                                                                   
+    int(3)                                                                                                                                                                         
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ### 第 3 步：查订单详情                                                                                                                                                          
+                                                                                                                                                                                   
+  GET /delay-order-demo/detail?order_no=OD202605041530001234                                                                                                                       
+                                                                                                                                                                                   
+  返回：                                                                                                                                                                           
+                                                                                                                                                                                   
+  {                                                                                                                                                                                
+    "code": 0,                                                                                                                                                                     
+    "message": "success",                                                                                                                                                          
+    "data": {                                                                                                                                                                      
+      "id": 1,                                                                                                                                                                     
+      "order_no": "OD202605041530001234",                                                                                                                                          
+      "user_id": 1001,                                                                                                                                                             
+      "amount": 99.9,                                                                                                                                                              
+      "status": 3,                                                                                                                                                                 
+      "created_at": "2026-05-04 15:30:00",                                                                                                                                         
+      "updated_at": "2026-05-04 15:30:15"                                                                                                                                          
+    }                                                                                                                                                                              
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  说明订单已关闭。                                                                                                                                                                 
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 场景 2：先支付，再等延迟任务执行                                                                                                                                              
+                                                                                                                                                                                   
+  ### 第 1 步：创建订单                                                                                                                                                            
+                                                                                                                                                                                   
+  GET /delay-order-demo/create                                                                                                                                                     
+                                                                                                                                                                                   
+  得到新订单号。                                                                                                                                                                   
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ### 第 2 步：15 秒内支付                                                                                                                                                         
+                                                                                                                                                                                   
+  GET /delay-order-demo/pay?order_no=OD202605041531001234                                                                                                                          
+                                                                                                                                                                                   
+  返回：                                                                                                                                                                           
+                                                                                                                                                                                   
+  {                                                                                                                                                                                
+    "code": 0,                                                                                                                                                                     
+    "message": "支付成功",                                                                                                                                                         
+    "data": {                                                                                                                                                                      
+      "order_no": "OD202605041531001234",                                                                                                                                          
+      "status": 2                                                                                                                                                                  
+    }                                                                                                                                                                              
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ### 第 3 步：等延迟任务执行                                                                                                                                                      
+                                                                                                                                                                                   
+  终端看到：                                                                                                                                                                       
+                                                                                                                                                                                   
+  === DelayCloseOrderBizJob handle ===                                                                                                                                             
+  array(2) {                                                                                                                                                                       
+    ["order_no"]=>                                                                                                                                                                 
+    string(20) "OD202605041531001234"                                                                                                                                              
+    ["execute_time"]=>                                                                                                                                                             
+    string(19) "2026-05-04 15:31:15"                                                                                                                                               
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  订单状态不是待支付，跳过关闭                                                                                                                                                     
+  array(2) {                                                                                                                                                                       
+    ["order_no"]=>                                                                                                                                                                 
+    string(20) "OD202605041531001234"                                                                                                                                              
+    ["status"]=>                                                                                                                                                                   
+    int(2)                                                                                                                                                                         
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  这就是企业里非常关键的一点：                                                                                                                                                     
+                                                                                                                                                                                   
+  > 延迟任务执行时，不能直接关单，必须重新查当前订单状态。
+
+
+> 延迟任务执行时，不能直接关单，必须重新查当前订单状态。                                                                                                                         
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 八、这个 demo 的企业价值                                                                                                                                                       
+                                                                                                                                                                                   
+  这个 demo 的关键不是“会写延迟队列”，而是学会这几个业务思想：                                                                                                                     
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 1）延迟任务执行前必须重新查状态                                                                                                                                               
+                                                                                                                                                                                   
+  因为用户可能已经支付了。                                                                                                                                                         
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 2）不能用“创建订单时的旧状态”直接做决策                                                                                                                                       
+                                                                                                                                                                                   
+  必须以“执行时数据库里的最新状态”为准。                                                                                                                                           
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 3）延迟关闭订单属于“最终一致性校验型任务”                                                                                                                                     
+                                                                                                                                                                                   
+  它不是主流程事务的一部分，而是：                                                                                                                                                 
+                                                                                                                                                                                   
+  - 到时间后兜底检查                                                                                                                                                               
+  - 再做关闭动作                                                                                                                                                                   
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 4）关闭动作最好再加条件更新                                                                                                                                                   
+                                                                                                                                                                                   
+  企业里更稳的做法不是：                                                                                                                                                           
+                                                                                                                                                                                   
+  $order->status = 3;                                                                                                                                                              
+  $order->save();                                                                                                                                                                  
+                                                                                                                                                                                   
+  而是：                                                                                                                                                                           
+                                                                                                                                                                                   
+  DemoDelayOrder::query()                                                                                                                                                          
+      ->update(['status' => 3]);                                                                                                                                                   
+                                                                                                                                                                                   
+  这样更安全，避免并发条件下误更新。                                                                                                                                               
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 九、企业增强版写法（更推荐）                                                                                                                                                   
+                                                                                                                                                                                   
+  把 Job 里的关闭动作改成这样：                                                                                                                                                    
+                                                                                                                                                                                   
+  $affected = DemoDelayOrder::query()                                                                                                                                              
+      ->where('order_no', $this->orderNo)                                                                                                                                          
+      ->where('status', 1)                                                                                                                                                         
+      ->update([                                                                                                                                                                   
+          'status' => 3,                                                                                                                                                           
+          'updated_at' => date('Y-m-d H:i:s'),                                                                                                                                     
+      ]);                                                                                                                                                                          
+                                                                                                                                                                                   
+  if ($affected === 0) {                                                                                                                                                           
+      var_dump('订单不是待支付状态，或已被其他流程处理，跳过关闭');                                                                                                                
+      return;                                                                                                                                                                      
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  这个比先查再改更适合企业并发场景。                                                                                                                                               
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 十、一句话总结                                                                                                                                                                 
+                                                                                                                                                                                   
+  这个实战 demo 的核心不是“延迟执行”，而是：                                                                                                                                       
+                                                                                                                                                                                   
+  > 到时间后重新校验订单状态，只关闭真正还未支付的订单。

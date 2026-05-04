@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace App\Model\Schema\Foo;
+namespace App\Schema\Foo;
 
 use Hyperf\Swagger\Annotation as SA;
 
