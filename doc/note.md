@@ -18928,3 +18928,879 @@ class OrderTransactionDemoService
   你要记住这句：                                                                                                                                                                   
                                                                                                                                                                                    
   > Hyperf 里，请求跑在协程里；请求态数据放 Context；不要放常驻对象属性。
+
+
+
+
+
+
+# 一、Demo 目标                                                                                                                                                                  
+                                                                                                                                                                                   
+  你先理解最简单的队列链路：                                                                                                                                                       
+                                                                                                                                                                                   
+  Controller                                                                                                                                                                       
+  -> Service 里投递 Job                                                                                                                                                            
+  -> Queue 消费进程消费 Job                                                                                                                                                        
+  -> 执行异步任务                                                                                                                                                                  
+                                                                                                                                                                                   
+  适合入门。                                                                                                                                                                       
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 二、目录结构                                                                                                                                                                   
+                                                                                                                                                                                   
+  app/                                                                                                                                                                             
+  ├── Controller/                                                                                                                                                                  
+  │   └── QueueDemoController.php                                                                                                                                                  
+  ├── Job/                                                                                                                                                                         
+  │   └── SendOrderSmsJob.php                                                                                                                                                      
+  └── Service/                                                                                                                                                                     
+      └── QueueDemoService.php                                                                                                                                                     
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 三、Job：队列任务类                                                                                                                                                            
+                                                                                                                                                                                   
+  文件：app/Job/SendOrderSmsJob.php                                                                                                                                                
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  namespace App\Job;                                                                                                                                                               
+                                                                                                                                                                                   
+  use Hyperf\AsyncQueue\Job;                                                                                                                                                       
+                                                                                                                                                                                   
+  class SendOrderSmsJob extends Job                                                                                                                                                
+  {                                                                                                                                                                                
+      /**                                                                                                                                                                          
+       * 短信接收手机号                                                                                                                                                            
+       */                                                                                                                                                                          
+      public string $mobile;                                                                                                                                                       
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 订单号                                                                                                                                                                    
+       */                                                                                                                                                                          
+      public string $orderNo;                                                                                                                                                      
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 重试次数                                                                                                                                                                  
+       */                                                                                                                                                                          
+      protected int $maxAttempts = 2;                                                                                                                                              
+                                                                                                                                                                                   
+      public function __construct(string $mobile, string $orderNo)                                                                                                                 
+      {                                                                                                                                                                            
+          $this->mobile = $mobile;                                                                                                                                                 
+          $this->orderNo = $orderNo;                                                                                                                                               
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 队列消费时真正执行的方法                                                                                                                                                  
+       */                                                                                                                                                                          
+      public function handle(): void                                                                                                                                               
+      {                                                                                                                                                                            
+          // 这里模拟发短信                                                                                                                                                        
+          var_dump('=== SendOrderSmsJob handle ===');                                                                                                                              
+          var_dump([                                                                                                                                                               
+              'mobile' => $this->mobile,                                                                                                                                           
+              'order_no' => $this->orderNo,                                                                                                                                        
+              'message' => '短信发送成功（模拟）',                                                                                                                                 
+          ]);                                                                                                                                                                      
+      }                                                                                                                                                                            
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 四、Service：投递队列任务                                                                                                                                                      
+                                                                                                                                                                                   
+  文件：app/Service/QueueDemoService.php                                                                                                                                           
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  namespace App\Service;                                                                                                                                                           
+                                                                                                                                                                                   
+  use App\Job\SendOrderSmsJob;                                                                                                                                                     
+  use Hyperf\AsyncQueue\Driver\DriverFactory;                                                                                                                                      
+                                                                                                                                                                                   
+  class QueueDemoService                                                                                                                                                           
+  {                                                                                                                                                                                
+      public function __construct(                                                                                                                                                 
+          protected DriverFactory $driverFactory                                                                                                                                   
+      ) {                                                                                                                                                                          
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 模拟下单成功后，异步投递短信任务                                                                                                                                          
+       */                                                                                                                                                                          
+      public function createOrderAndPushJob(): array                                                                                                                               
+      {                                                                                                                                                                            
+          $orderNo = 'ORD' . date('YmdHis') . mt_rand(1000, 9999);                                                                                                                 
+          $mobile = '13800138000';                                                                                                                                                 
+                                                                                                                                                                                   
+          // 获取默认队列驱动                                                                                                                                                      
+          $driver = $this->driverFactory->get('default');                                                                                                                          
+                                                                                                                                                                                   
+          // 投递任务到队列                                                                                                                                                        
+          $driver->push(new SendOrderSmsJob($mobile, $orderNo));                                                                                                                   
+                                                                                                                                                                                   
+          return [                                                                                                                                                                 
+              'code' => 0,                                                                                                                                                         
+              'message' => '下单成功，短信任务已投递到队列',                                                                                                                       
+              'data' => [                                                                                                                                                          
+                  'order_no' => $orderNo,                                                                                                                                          
+                  'mobile' => $mobile,                                                                                                                                             
+              ],                                                                                                                                                                   
+          ];                                                                                                                                                                       
+      }                                                                                                                                                                            
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 五、Controller：触发接口                                                                                                                                                       
+                                                                                                                                                                                   
+  文件：app/Controller/QueueDemoController.php                                                                                                                                     
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  namespace App\Controller;                                                                                                                                                        
+                                                                                                                                                                                   
+  use App\Service\QueueDemoService;                                                                                                                                                
+  use Hyperf\HttpServer\Annotation\Controller;                                                                                                                                     
+  use Hyperf\HttpServer\Annotation\GetMapping;                                                                                                                                     
+                                                                                                                                                                                   
+  #[Controller(prefix: 'queue-demo')]                                                                                                                                              
+  class QueueDemoController                                                                                                                                                        
+  {                                                                                                                                                                                
+      public function __construct(                                                                                                                                                 
+          protected QueueDemoService $service                                                                                                                                      
+      ) {                                                                                                                                                                          
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      #[GetMapping('push')]                                                                                                                                                        
+      public function push(): array                                                                                                                                                
+      {                                                                                                                                                                            
+          return $this->service->createOrderAndPushJob();                                                                                                                          
+      }                                                                                                                                                                            
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 六、队列配置                                                                                                                                                                   
+                                                                                                                                                                                   
+  文件：config/autoload/async_queue.php                                                                                                                                            
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  return [                                                                                                                                                                         
+      'default' => [                                                                                                                                                               
+          'driver' => Hyperf\AsyncQueue\Driver\RedisDriver::class,                                                                                                                 
+          'channel' => 'default',                                                                                                                                                  
+          'timeout' => 2,                                                                                                                                                          
+          'retry_seconds' => 5,                                                                                                                                                    
+          'handle_timeout' => 10,                                                                                                                                                  
+          'processes' => 1,                                                                                                                                                        
+          'concurrent' => [                                                                                                                                                        
+              'limit' => 5,                                                                                                                                                        
+          ],                                                                                                                                                                       
+      ],                                                                                                                                                                           
+  ];                                                                                                                                                                               
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 七、Redis 配置示例                                                                                                                                                             
+                                                                                                                                                                                   
+  因为 Hyperf 异步队列常见是走 Redis。                                                                                                                                             
+                                                                                                                                                                                   
+  文件：config/autoload/redis.php                                                                                                                                                  
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  return [                                                                                                                                                                         
+      'default' => [                                                                                                                                                               
+          'host' => '127.0.0.1',                                                                                                                                                   
+          'auth' => null,                                                                                                                                                          
+          'port' => 6379,                                                                                                                                                          
+          'db' => 0,                                                                                                                                                               
+          'pool' => [                                                                                                                                                              
+              'min_connections' => 1,                                                                                                                                              
+              'max_connections' => 10,                                                                                                                                             
+              'connect_timeout' => 10.0,                                                                                                                                           
+              'wait_timeout' => 3.0,                                                                                                                                               
+              'heartbeat' => -1,                                                                                                                                                   
+              'max_idle_time' => 60.0,                                                                                                                                             
+          ],                                                                                                                                                                       
+      ],                                                                                                                                                                           
+  ];                                                                                                                                                                               
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 八、安装依赖                                                                                                                                                                   
+                                                                                                                                                                                   
+  如果你项目还没装异步队列组件：                                                                                                                                                   
+                                                                                                                                                                                   
+  composer require hyperf/async-queue                                                                                                                                              
+                                                                                                                                                                                   
+  如果没有 Redis 驱动相关，也要确保 Redis 组件可用。                                                                                                                               
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 九、启动方式                                                                                                                                                                   
+                                                                                                                                                                                   
+  ## 1）先启动 Hyperf                                                                                                                                                              
+                                                                                                                                                                                   
+  php bin/hyperf.php start                                                                                                                                                         
+                                                                                                                                                                                   
+  ## 2）再启动队列消费进程                                                                                                                                                         
+                                                                                                                                                                                   
+  常见方式是直接让 async queue 进程随服务启动。                                                                                                                                    
+  如果你的项目配置没问题，启动后会自动拉起消费进程。                                                                                                                               
+                                                                                                                                                                                   
+  如果你是独立测试，也可以看你项目是否有消费命令或 process 配置。                                                                                                                  
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 十、访问接口                                                                                                                                                                   
+                                                                                                                                                                                   
+  GET /queue-demo/push                                                                                                                                                             
+                                                                                                                                                                                   
+  例如：                                                                                                                                                                           
+                                                                                                                                                                                   
+  http://127.0.0.1:9501/queue-demo/push                                                                                                                                            
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 十一、接口返回示例                                                                                                                                                             
+                                                                                                                                                                                   
+  {                                                                                                                                                                                
+    "code": 0,                                                                                                                                                                     
+    "message": "下单成功，短信任务已投递到队列",                                                                                                                                   
+    "data": {                                                                                                                                                                      
+      "order_no": "ORD202605041230301234",                                                                                                                                         
+      "mobile": "13800138000"                                                                                                                                                      
+    }                                                                                                                                                                              
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 十二、终端消费日志示例                                                                                                                                                         
+                                                                                                                                                                                   
+  当队列消费者执行 Job 时，终端会看到：                                                                                                                                            
+                                                                                                                                                                                   
+  === SendOrderSmsJob handle ===                                                                                                                                                   
+  array(3) {                                                                                                                                                                       
+    ["mobile"]=>                                                                                                                                                                   
+    string(11) "13800138000"                                                                                                                                                       
+    ["order_no"]=>                                                                                                                                                                 
+    string(22) "ORD202605041230301234"                                                                                                                                             
+    ["message"]=>                                                                                                                                                                  
+    string(27) "短信发送成功（模拟）"                                                                                                                                              
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 十三、这个 demo 学什么                                                                                                                                                         
+                                                                                                                                                                                   
+  你先抓住 3 件事：                                                                                                                                                                
+                                                                                                                                                                                   
+  ## 1）Job 是异步任务载体                                                                                                                                                         
+                                                                                                                                                                                   
+  里面放任务参数：                                                                                                                                                                 
+                                                                                                                                                                                   
+  - 手机号                                                                                                                                                                         
+  - 订单号                                                                                                                                                                         
+  - 用户 ID                                                                                                                                                                        
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 2）Service 负责投递任务                                                                                                                                                       
+                                                                                                                                                                                   
+  核心代码：                                                                                                                                                                       
+                                                                                                                                                                                   
+  $driver->push(new SendOrderSmsJob($mobile, $orderNo));                                                                                                                           
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 3）Job 的 handle() 才是异步消费执行逻辑                                                                                                                                       
+                                                                                                                                                                                   
+  真正被消费者执行的是：                                                                                                                                                           
+                                                                                                                                                                                   
+  public function handle(): void                                                                                                                                                   
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 十四、企业里常见用途                                                                                                                                                           
+                                                                                                                                                                                   
+  这个简单队列模式常用于：                                                                                                                                                         
+                                                                                                                                                                                   
+  - 发送短信                                                                                                                                                                       
+  - 发送邮件                                                                                                                                                                       
+  - 写操作日志                                                                                                                                                                     
+  - 刷新缓存                                                                                                                                                                       
+  - 推送通知                                                                                                                                                                       
+  - 回调第三方接口                                                                                                                                                                 
+  - 生成报表                                                                                                                                                                       
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 十五、再给你一个更企业一点的理解                                                                                                                                               
+                                                                                                                                                                                   
+  同步接口里不要做太多耗时操作，比如：                                                                                                                                             
+                                                                                                                                                                                   
+  - 发短信                                                                                                                                                                         
+  - 发邮件                                                                                                                                                                         
+  - 调第三方慢接口                                                                                                                                                                 
+                                                                                                                                                                                   
+  应该：                                                                                                                                                                           
+                                                                                                                                                                                   
+  主流程成功                                                                                                                                                                       
+  -> 投递队列                                                                                                                                                                      
+  -> 立即返回前端                                                                                                                                                                  
+  -> 异步慢慢处理                                                                                                                                                                  
+                                                                                                                                                                                   
+  这样接口响应更快。
+
+
+
+
+———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 一、先记住一句话                                                                                                                                                               
+                                                                                                                                                                                   
+  > 异步队列 = 主流程先返回，耗时任务丢给后台慢慢处理。                                                                                                                            
+                                                                                                                                                                                   
+  比如：                                                                                                                                                                           
+                                                                                                                                                                                   
+  - 下单后发短信                                                                                                                                                                   
+  - 发邮件                                                                                                                                                                         
+  - 推送消息                                                                                                                                                                       
+  - 刷新缓存                                                                                                                                                                       
+  - 调第三方接口                                                                                                                                                                   
+  - 生成报表                                                                                                                                                                       
+  - 审核 / 风控 / 回调                                                                                                                                                             
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 二、先理解为什么需要异步队列                                                                                                                                                   
+                                                                                                                                                                                   
+  如果同步做：                                                                                                                                                                     
+                                                                                                                                                                                   
+  下单接口                                                                                                                                                                         
+  -> 写订单                                                                                                                                                                        
+  -> 扣库存                                                                                                                                                                        
+  -> 发短信                                                                                                                                                                        
+  -> 发站内信                                                                                                                                                                      
+  -> 调第三方                                                                                                                                                                      
+  -> 写操作日志                                                                                                                                                                    
+  -> 返回                                                                                                                                                                          
+                                                                                                                                                                                   
+  问题：                                                                                                                                                                           
+                                                                                                                                                                                   
+  - 接口慢                                                                                                                                                                         
+  - 用户体验差                                                                                                                                                                     
+  - 第三方一抖动就拖死主流程                                                                                                                                                       
+                                                                                                                                                                                   
+  所以企业里会拆成：                                                                                                                                                               
+                                                                                                                                                                                   
+  下单主流程成功                                                                                                                                                                   
+  -> 投递队列                                                                                                                                                                      
+  -> 接口立即返回                                                                                                                                                                  
+  -> 消费者异步处理短信/通知/日志                                                                                                                                                  
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 三、你要掌握的 5 个核心概念                                                                                                                                                    
+                                                                                                                                                                                   
+  ## 1. 生产者                                                                                                                                                                     
+                                                                                                                                                                                   
+  谁把任务放进队列。                                                                                                                                                               
+                                                                                                                                                                                   
+  比如：                                                                                                                                                                           
+                                                                                                                                                                                   
+  - Controller                                                                                                                                                                     
+  - Service                                                                                                                                                                        
+  - 下单成功逻辑                                                                                                                                                                   
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 2. 队列                                                                                                                                                                       
+                                                                                                                                                                                   
+  任务暂存的地方。                                                                                                                                                                 
+                                                                                                                                                                                   
+  常见：                                                                                                                                                                           
+                                                                                                                                                                                   
+  - Redis                                                                                                                                                                          
+  - RabbitMQ                                                                                                                                                                       
+  - Kafka                                                                                                                                                                          
+  - SQS                                                                                                                                                                            
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 3. 消费者                                                                                                                                                                     
+                                                                                                                                                                                   
+  不断从队列里取任务并执行。                                                                                                                                                       
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 4. Job                                                                                                                                                                        
+                                                                                                                                                                                   
+  任务载体。                                                                                                                                                                       
+                                                                                                                                                                                   
+  里面一般有：                                                                                                                                                                     
+                                                                                                                                                                                   
+  - user_id                                                                                                                                                                        
+  - order_no                                                                                                                                                                       
+  - mobile                                                                                                                                                                         
+  - retry count                                                                                                                                                                    
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 5. 重试 / 失败 / 幂等                                                                                                                                                         
+                                                                                                                                                                                   
+  企业里最核心，不是“push 成功”，而是：                                                                                                                                            
+                                                                                                                                                                                   
+  - 失败能不能重试                                                                                                                                                                 
+  - 重试会不会重复执行                                                                                                                                                             
+  - 任务丢了怎么办                                                                                                                                                                 
+  - 任务积压怎么办                                                                                                                                                                 
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 四、最推荐的学习顺序                                                                                                                                                           
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 第 1 阶段：先学最简单队列 Demo                                                                                                                                                
+                                                                                                                                                                                   
+  目标：                                                                                                                                                                           
+                                                                                                                                                                                   
+  - 会写 Job                                                                                                                                                                       
+  - 会 push                                                                                                                                                                        
+  - 会消费                                                                                                                                                                         
+  - 能看到 Redis 里有任务                                                                                                                                                          
+  - 能看到 handle() 执行                                                                                                                                                           
+                                                                                                                                                                                   
+  你刚才这个阶段已经快到了。                                                                                                                                                       
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 第 2 阶段：学失败重试                                                                                                                                                         
+                                                                                                                                                                                   
+  目标：                                                                                                                                                                           
+                                                                                                                                                                                   
+  - 故意抛异常                                                                                                                                                                     
+  - 观察任务重试                                                                                                                                                                   
+  - 理解 maxAttempts                                                                                                                                                               
+                                                                                                                                                                                   
+  比如：                                                                                                                                                                           
+                                                                                                                                                                                   
+  public function handle(): void                                                                                                                                                   
+  {                                                                                                                                                                                
+      throw new \RuntimeException('模拟消费失败');                                                                                                                                 
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  看它怎么重试。                                                                                                                                                                   
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 第 3 阶段：学延迟队列                                                                                                                                                         
+                                                                                                                                                                                   
+  目标：                                                                                                                                                                           
+                                                                                                                                                                                   
+  - 不是立刻执行                                                                                                                                                                   
+  - 而是 10 秒后 / 5 分钟后执行                                                                                                                                                    
+                                                                                                                                                                                   
+  企业常见：                                                                                                                                                                       
+                                                                                                                                                                                   
+  - 订单超时关闭                                                                                                                                                                   
+  - 延迟通知                                                                                                                                                                       
+  - 延迟补偿                                                                                                                                                                       
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 第 4 阶段：学幂等                                                                                                                                                             
+                                                                                                                                                                                   
+  这是企业最重要的一步。                                                                                                                                                           
+                                                                                                                                                                                   
+  因为队列天然可能：                                                                                                                                                               
+                                                                                                                                                                                   
+  - 重复消费                                                                                                                                                                       
+  - 重试消费                                                                                                                                                                       
+  - 消费者重启后再次消费                                                                                                                                                           
+                                                                                                                                                                                   
+  所以你必须学会：                                                                                                                                                                 
+                                                                                                                                                                                   
+  > 同一个任务执行多次，结果也不能错。                                                                                                                                             
+                                                                                                                                                                                   
+  例如：                                                                                                                                                                           
+                                                                                                                                                                                   
+  - 发券不能重复发                                                                                                                                                                 
+  - 扣库存不能重复扣                                                                                                                                                               
+  - 更新状态不能反复乱改                                                                                                                                                           
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 第 5 阶段：学业务拆分                                                                                                                                                         
+                                                                                                                                                                                   
+  把异步队列放到真实业务里：                                                                                                                                                       
+                                                                                                                                                                                   
+  - 下单后发短信                                                                                                                                                                   
+  - 支付成功后发通知                                                                                                                                                               
+  - IM 消息抄送异步落库                                                                                                                                                            
+  - 注册后异步发欢迎消息                                                                                                                                                           
+  - 审核后异步更新搜索索引                                                                                                                                                         
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 五、企业开发里怎么真正用                                                                                                                                                       
+                                                                                                                                                                                   
+  企业里一般不是“为了用队列而用队列”，而是这几类场景：                                                                                                                             
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 1. 削峰                                                                                                                                                                       
+                                                                                                                                                                                   
+  高并发流量先进入队列，慢慢处理。                                                                                                                                                 
+                                                                                                                                                                                   
+  比如：                                                                                                                                                                           
+                                                                                                                                                                                   
+  - 秒杀下单                                                                                                                                                                       
+  - 批量导入                                                                                                                                                                       
+  - 大量消息推送                                                                                                                                                                   
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 2. 解耦                                                                                                                                                                       
+                                                                                                                                                                                   
+  下单服务不直接关心短信怎么发。                                                                                                                                                   
+                                                                                                                                                                                   
+  订单服务                                                                                                                                                                         
+  -> 发送下单成功事件 / Job                                                                                                                                                        
+  -> 短信服务消费                                                                                                                                                                  
+                                                                                                                                                                                   
+  这样模块更清晰。                                                                                                                                                                 
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 3. 异步化                                                                                                                                                                     
+                                                                                                                                                                                   
+  把非核心耗时逻辑异步处理。                                                                                                                                                       
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 4. 最终一致性                                                                                                                                                                 
+                                                                                                                                                                                   
+  比如：                                                                                                                                                                           
+                                                                                                                                                                                   
+  - 主库订单已成功                                                                                                                                                                 
+  - 通知消息稍后补发                                                                                                                                                               
+  - 搜索索引稍后更新                                                                                                                                                               
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 六、你必须懂的底层原理                                                                                                                                                         
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 1. 本质就是“生产者消费者模型”                                                                                                                                                 
+                                                                                                                                                                                   
+  Producer -> Queue -> Consumer                                                                                                                                                    
+                                                                                                                                                                                   
+  生产者只负责塞任务。                                                                                                                                                             
+  消费者负责慢慢处理。                                                                                                                                                             
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 2. 为什么能解耦                                                                                                                                                               
+                                                                                                                                                                                   
+  因为主流程不直接执行耗时逻辑，而是只做“投递”。                                                                                                                                   
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 3. 为什么会重复消费                                                                                                                                                           
+                                                                                                                                                                                   
+  因为消费者可能：                                                                                                                                                                 
+                                                                                                                                                                                   
+  - 执行成功但 ack 前挂了                                                                                                                                                          
+  - 网络抖动                                                                                                                                                                       
+  - 重试机制触发                                                                                                                                                                   
+                                                                                                                                                                                   
+  所以不能假设“只会执行一次”。                                                                                                                                                     
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 4. 为什么要幂等                                                                                                                                                               
+                                                                                                                                                                                   
+  因为“至少一次投递”比“绝对只一次”更容易实现。                                                                                                                                     
+                                                                                                                                                                                   
+  所以企业常态是：                                                                                                                                                                 
+                                                                                                                                                                                   
+  > 接受任务可能重复执行，但业务上保证结果正确。                                                                                                                                   
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 5. 为什么会积压                                                                                                                                                               
+                                                                                                                                                                                   
+  消费者处理速度 < 生产速度。                                                                                                                                                      
+                                                                                                                                                                                   
+  这时就会：                                                                                                                                                                       
+                                                                                                                                                                                   
+  - Redis 队列越来越长                                                                                                                                                             
+  - 消费延迟越来越高                                                                                                                                                               
+  - 任务越堆越多                                                                                                                                                                   
+                                                                                                                                                                                   
+  所以企业里要关注：                                                                                                                                                               
+                                                                                                                                                                                   
+  - 消费速度                                                                                                                                                                       
+  - 并发数                                                                                                                                                                         
+  - 失败率                                                                                                                                                                         
+  - 重试次数                                                                                                                                                                       
+  - 队列长度                                                                                                                                                                       
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 七、企业里必须关注的几个问题                                                                                                                                                   
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 1. 幂等                                                                                                                                                                       
+                                                                                                                                                                                   
+  比如发短信：                                                                                                                                                                     
+                                                                                                                                                                                   
+  - 可以重复收到一次，影响不大                                                                                                                                                     
+                                                                                                                                                                                   
+  比如扣库存：                                                                                                                                                                     
+                                                                                                                                                                                   
+  - 绝对不能重复扣                                                                                                                                                                 
+                                                                                                                                                                                   
+  所以不同业务幂等要求不同。                                                                                                                                                       
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 2. 重试                                                                                                                                                                       
+                                                                                                                                                                                   
+  失败后要不要重试？                                                                                                                                                               
+                                                                                                                                                                                   
+  - 第三方超时：适合重试                                                                                                                                                           
+  - 参数错误：不适合重试                                                                                                                                                           
+  - 业务状态已关闭：一般不重试                                                                                                                                                     
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 3. 死信 / 失败记录                                                                                                                                                            
+                                                                                                                                                                                   
+  重试多次还失败怎么办？                                                                                                                                                           
+                                                                                                                                                                                   
+  企业里一般会：                                                                                                                                                                   
+                                                                                                                                                                                   
+  - 落失败表                                                                                                                                                                       
+  - 记录错误日志                                                                                                                                                                   
+  - 人工补偿                                                                                                                                                                       
+  - 告警通知                                                                                                                                                                       
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 4. 监控                                                                                                                                                                       
+                                                                                                                                                                                   
+  你要知道：                                                                                                                                                                       
+                                                                                                                                                                                   
+  - 队列长度                                                                                                                                                                       
+  - 消费耗时                                                                                                                                                                       
+  - 失败数                                                                                                                                                                         
+  - 重试数                                                                                                                                                                         
+  - 堆积量                                                                                                                                                                         
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 5. 顺序性                                                                                                                                                                     
+                                                                                                                                                                                   
+  有些任务不能乱序。                                                                                                                                                               
+                                                                                                                                                                                   
+  比如：                                                                                                                                                                           
+                                                                                                                                                                                   
+  - 先创建订单                                                                                                                                                                     
+  - 再支付                                                                                                                                                                         
+  - 再发货                                                                                                                                                                         
+                                                                                                                                                                                   
+  如果消息乱序，业务会错。                                                                                                                                                         
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 八、最适合你的实战练习路线                                                                                                                                                     
+                                                                                                                                                                                   
+  我建议你按这 8 个 demo 练：                                                                                                                                                      
+                                                                                                                                                                                   
+  1. 简单发送短信队列 demo                                                                                                                                                         
+  2. 失败重试 demo                                                                                                                                                                 
+  3. 延迟关闭订单 demo                                                                                                                                                             
+  4. 幂等消费 demo                                                                                                                                                                 
+  5. 队列写操作日志 demo                                                                                                                                                           
+  6. 支付成功异步通知 demo                                                                                                                                                         
+  7. 秒杀削峰队列 demo                                                                                                                                                             
+  8. 失败任务补偿 demo                                                                                                                                                             
+                                                                                                                                                                                   
+  你把这 8 个跑完，队列就比较熟了。                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 九、学习时怎么判断自己真的会了                                                                                                                                                 
+                                                                                                                                                                                   
+  你至少要能回答这几个问题：                                                                                                                                                       
+                                                                                                                                                                                   
+  ## 会用层                                                                                                                                                                        
+                                                                                                                                                                                   
+  - 怎么定义 Job？                                                                                                                                                                 
+  - 怎么 push？                                                                                                                                                                    
+  - 怎么消费？                                                                                                                                                                     
+  - 怎么看 Redis 里有没有任务？                                                                                                                                                    
+                                                                                                                                                                                   
+  ## 原理层                                                                                                                                                                        
+                                                                                                                                                                                   
+  - 为什么异步队列能提升响应速度？                                                                                                                                                 
+  - 为什么会重复消费？                                                                                                                                                             
+  - 为什么要幂等？                                                                                                                                                                 
+  - 为什么会积压？                                                                                                                                                                 
+                                                                                                                                                                                   
+  ## 企业层                                                                                                                                                                        
+                                                                                                                                                                                   
+  - 什么场景适合异步？                                                                                                                                                             
+  - 什么场景不能乱异步？                                                                                                                                                           
+  - 失败怎么补偿？                                                                                                                                                                 
+  - 怎么设计监控和告警？                                                                                                                                                           
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 十、哪些场景不要乱上异步队列                                                                                                                                                   
+                                                                                                                                                                                   
+  不是所有逻辑都应该异步。                                                                                                                                                         
+                                                                                                                                                                                   
+  比如：                                                                                                                                                                           
+                                                                                                                                                                                   
+  - 必须立刻返回最终结果给前端                                                                                                                                                     
+  - 强一致实时写入                                                                                                                                                                 
+  - 用户必须立即看到结果                                                                                                                                                           
+                                                                                                                                                                                   
+  这些就不能乱拆。                                                                                                                                                                 
+                                                                                                                                                                                   
+  例如：                                                                                                                                                                           
+                                                                                                                                                                                   
+  - 创建订单主记录                                                                                                                                                                 
+  - 正式扣库存                                                                                                                                                                     
+  - 核心支付状态更新                                                                                                                                                               
+                                                                                                                                                                                   
+  这些通常还是主流程事务里做。                                                                                                                                                     
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 十一、企业视角下的最佳分层                                                                                                                                                     
+                                                                                                                                                                                   
+  推荐：                                                                                                                                                                           
+                                                                                                                                                                                   
+  Controller                                                                                                                                                                       
+  -> Service                                                                                                                                                                       
+  -> push Job                                                                                                                                                                      
+  -> Job handle                                                                                                                                                                    
+  -> 调用领域 Service / Repository                                                                                                                                                 
+                                                                                                                                                                                   
+  不要把 Job 写成超大胖类。                                                                                                                                                        
+                                                                                                                                                                                   
+  Job 更适合：                                                                                                                                                                     
+                                                                                                                                                                                   
+  - 接参数                                                                                                                                                                         
+  - 做少量校验                                                                                                                                                                     
+  - 调 Service 执行业务                                                                                                                                                            
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 十二、一套很实用的学习方法                                                                                                                                                     
+                                                                                                                                                                                   
+  ## 第一步：先跑通                                                                                                                                                                
+                                                                                                                                                                                   
+  先别管高级概念，先做到：                                                                                                                                                         
+                                                                                                                                                                                   
+  - push 成功                                                                                                                                                                      
+  - handle 执行                                                                                                                                                                    
+  - Redis 能看到任务                                                                                                                                                               
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 第二步：故意制造问题                                                                                                                                                          
+                                                                                                                                                                                   
+  比如：                                                                                                                                                                           
+                                                                                                                                                                                   
+  - 消费抛异常                                                                                                                                                                     
+  - Redis 断开                                                                                                                                                                     
+  - 重复 push                                                                                                                                                                      
+  - 模拟第三方超时                                                                                                                                                                 
+                                                                                                                                                                                   
+  这样你才能真正理解。                                                                                                                                                             
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 第三步：带业务练                                                                                                                                                              
+                                                                                                                                                                                   
+  一定要结合：                                                                                                                                                                     
+                                                                                                                                                                                   
+  - 下单                                                                                                                                                                           
+  - 支付                                                                                                                                                                           
+  - 库存                                                                                                                                                                           
+  - 消息通知                                                                                                                                                                       
+  - 操作日志                                                                                                                                                                       
+                                                                                                                                                                                   
+  别只做“Hello Queue”。                                                                                                                                                            
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 第四步：总结套路                                                                                                                                                              
+                                                                                                                                                                                   
+  你最后要形成自己的判断：                                                                                                                                                         
+                                                                                                                                                                                   
+  - 哪些逻辑同步                                                                                                                                                                   
+  - 哪些逻辑异步                                                                                                                                                                   
+  - 哪些任务必须幂等                                                                                                                                                               
+  - 哪些任务需要补偿                                                                                                                                                               
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 十三、给你一个企业版思维框架                                                                                                                                                   
+                                                                                                                                                                                   
+  以后你看到一个需求，就问自己 6 件事：                                                                                                                                            
+                                                                                                                                                                                   
+  1. 这件事是否耗时？                                                                                                                                                              
+  2. 是否必须同步返回？                                                                                                                                                            
+  3. 失败是否影响主流程？                                                                                                                                                          
+  4. 是否允许重试？                                                                                                                                                                
+  5. 是否需要幂等？                                                                                                                                                                
+  6. 是否需要监控和补偿？                                                                                                                                                          
+                                                                                                                                                                                   
+  这就是企业里设计队列的思路。                                                                                                                                                     
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 十四、最短学习路线总结                                                                                                                                                         
+                                                                                                                                                                                   
+  如果你想最快熟悉，我建议就按这个顺序：                                                                                                                                           
+                                                                                                                                                                                   
+  1. 简单队列 push / consume                                                                                                                                                       
+  2. 失败重试                                                                                                                                                                      
+  3. 延迟队列                                                                                                                                                                      
+  4. 幂等                                                                                                                                                                          
+  5. 队列积压与监控                                                                                                                                                                
+  6. 下单/支付/通知实战                                                                                                                                                            
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  如果你要，我下一步可以直接继续帮你做一整套：                                                                                                                                     
+                                                                                                                                                                                   
+  1. 《Hyfef 异步队列入门到企业实战》Markdown 文档                                                                                                                                 
+  2. 失败重试 demo                                                                                                                                                                 
+  3. 延迟队列 demo                                                                                                                                                                 
+  4. 幂等消费 demo                                                                                                                                                                 
+  5. 队列 + 订单业务完整 demo
