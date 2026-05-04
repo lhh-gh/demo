@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "9123b8fd763376cdeb75da5733e5a03d",
+    "content-hash": "0d562b4e7c0fd4eb3107ec365bb2498e",
     "packages": [
         {
             "name": "carbonphp/carbon-doctrine-types",
@@ -3965,11 +3965,11 @@
         },
         {
             "name": "lhh-gh/hyperf-swagger-sa-generator",
-            "version": "dev-main",
+            "version": "dev-master",
             "dist": {
                 "type": "path",
                 "url": "../hyperf-swagger-sa-generator",
-                "reference": "87624778281795f03284397dc233d37c4892f6f2"
+                "reference": "5f4630fbdffc52ff5b050607ebd20831e7c9fe4f"
             },
             "require": {
                 "hyperf/di": "3.1.*",

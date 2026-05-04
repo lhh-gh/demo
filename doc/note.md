@@ -16549,3 +16549,1293 @@ class OrderTransactionDemoService
   > 用 EXPLAIN 分析 SQL，不是只看“走没走索引”，而是要结合 type、key、rows、Extra，判断扫描成本、排序成本、回表成本、分页成本，再给出最小可落地的优化方案。                         
                                                                                                                                                                                    
   ———
+
+
+# 生命周期
+
+> 自己做一个“请求从启动到响应结束”的 demo，把每个阶段打日志。                                                                                                                    
+                                                                                                                                                                                   
+  这样你会非常快理解：                                                                                                                                                             
+                                                                                                                                                                                   
+  - 框架什么时候启动                                                                                                                                                               
+  - 配置什么时候加载                                                                                                                                                               
+  - 容器什么时候初始化                                                                                                                                                             
+  - 路由什么时候匹配                                                                                                                                                               
+  - 中间件什么时候执行                                                                                                                                                             
+  - Controller / Service 什么时候执行                                                                                                                                              
+  - Response 什么时候返回                                                                                                                                                          
+  - 进程 / Worker 生命周期是什么                                                                                                                                                   
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 一、先一句话理解 Hyperf 生命周期                                                                                                                                               
+                                                                                                                                                                                   
+  可以粗略理解成两大类：                                                                                                                                                           
+                                                                                                                                                                                   
+  ## 1. 应用启动生命周期                                                                                                                                                           
+                                                                                                                                                                                   
+  就是服务从：                                                                                                                                                                     
+                                                                                                                                                                                   
+  php bin/hyperf.php start                                                                                                                                                         
+                                                                                                                                                                                   
+  开始，到 Worker 进程启动完成。                                                                                                                                                   
+                                                                                                                                                                                   
+  这阶段重点是：                                                                                                                                                                   
+                                                                                                                                                                                   
+  - 读取配置                                                                                                                                                                       
+  - 初始化容器                                                                                                                                                                     
+  - 注册事件                                                                                                                                                                       
+  - 启动 Server                                                                                                                                                                    
+  - Worker 进程启动                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 2. 单次请求生命周期                                                                                                                                                           
+                                                                                                                                                                                   
+  就是某个 HTTP 请求进来后，到响应返回。                                                                                                                                           
+                                                                                                                                                                                   
+  这阶段重点是：                                                                                                                                                                   
+                                                                                                                                                                                   
+  - 请求进入                                                                                                                                                                       
+  - 路由匹配                                                                                                                                                                       
+  - 中间件执行                                                                                                                                                                     
+  - Controller 执行                                                                                                                                                                
+  - Service 执行                                                                                                                                                                   
+  - 返回响应                                                                                                                                                                       
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 二、你要怎么学最快                                                                                                                                                             
+                                                                                                                                                                                   
+  我建议你做 3 个 demo：                                                                                                                                                           
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## demo 1：应用启动生命周期日志 demo                                                                                                                                             
+                                                                                                                                                                                   
+  目标：看服务启动时发生了什么                                                                                                                                                     
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## demo 2：HTTP 请求生命周期 demo                                                                                                                                                
+                                                                                                                                                                                   
+  目标：看一个请求从进来到返回的全过程                                                                                                                                             
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## demo 3：中间件 + 事件 + AOP 混合观察 demo                                                                                                                                     
+                                                                                                                                                                                   
+  目标：看扩展点分别在哪个阶段执行                                                                                                                                                 
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 三、你先要记住 Hyperf 最常见的生命周期节点                                                                                                                                     
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 1. 启动阶段                                                                                                                                                                   
+                                                                                                                                                                                   
+  大致顺序你可以先这么理解：                                                                                                                                                       
+                                                                                                                                                                                   
+  1. 加载环境变量                                                                                                                                                                  
+  2. 加载配置                                                                                                                                                                      
+  3. 初始化 DI 容器                                                                                                                                                                
+  4. 注册注解 / 属性 / 代理类                                                                                                                                                      
+  5. 触发 BootApplication 等事件                                                                                                                                                   
+  6. 创建 Server                                                                                                                                                                   
+  7. Worker 启动                                                                                                                                                                   
+  8. 准备接收请求                                                                                                                                                                  
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 2. 请求阶段                                                                                                                                                                   
+                                                                                                                                                                                   
+  大致顺序：                                                                                                                                                                       
+                                                                                                                                                                                   
+  1. 请求到达 Server                                                                                                                                                               
+  2. 进入 CoreMiddleware                                                                                                                                                           
+  3. 路由匹配                                                                                                                                                                      
+  4. 执行全局 / 局部中间件                                                                                                                                                         
+  5. 执行 Controller                                                                                                                                                               
+  6. 调用 Service / Repository / Model                                                                                                                                             
+  7. 生成 Response                                                                                                                                                                 
+  8. 返回客户端                                                                                                                                                                    
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 四、最推荐你的生命周期 demo                                                                                                                                                    
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # demo 1：HTTP 请求生命周期 demo                                                                                                                                                 
+                                                                                                                                                                                   
+  这个最适合入门。                                                                                                                                                                 
+                                                                                                                                                                                   
+  ## 1）Controller                                                                                                                                                                 
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  namespace App\Controller;                                                                                                                                                        
+                                                                                                                                                                                   
+  use App\Service\LifecycleDemoService;                                                                                                                                            
+  use Hyperf\HttpServer\Annotation\Controller;                                                                                                                                     
+  use Hyperf\HttpServer\Annotation\GetMapping;                                                                                                                                     
+  use Psr\Log\LoggerInterface;                                                                                                                                                     
+                                                                                                                                                                                   
+  #[Controller(prefix: 'lifecycle')]                                                                                                                                               
+  class LifecycleDemoController                                                                                                                                                    
+  {                                                                                                                                                                                
+      public function __construct(                                                                                                                                                 
+          protected LoggerInterface $logger,                                                                                                                                       
+          protected LifecycleDemoService $service                                                                                                                                  
+      ) {                                                                                                                                                                          
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      #[GetMapping('test')]                                                                                                                                                        
+      public function test(): array                                                                                                                                                
+      {                                                                                                                                                                            
+          $this->logger->info('1. 进入 Controller');                                                                                                                               
+                                                                                                                                                                                   
+          $result = $this->service->handle();                                                                                                                                      
+                                                                                                                                                                                   
+          $this->logger->info('5. Controller 准备返回响应');                                                                                                                       
+                                                                                                                                                                                   
+          return [                                                                                                                                                                 
+              'code' => 0,                                                                                                                                                         
+              'message' => 'success',                                                                                                                                              
+              'data' => $result,                                                                                                                                                   
+          ];                                                                                                                                                                       
+      }                                                                                                                                                                            
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 2）Service                                                                                                                                                                    
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  namespace App\Service;                                                                                                                                                           
+                                                                                                                                                                                   
+  use Psr\Log\LoggerInterface;                                                                                                                                                     
+                                                                                                                                                                                   
+  class LifecycleDemoService                                                                                                                                                       
+  {                                                                                                                                                                                
+      public function __construct(                                                                                                                                                 
+          protected LoggerInterface $logger                                                                                                                                        
+      ) {                                                                                                                                                                          
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      public function handle(): array                                                                                                                                              
+      {                                                                                                                                                                            
+          $this->logger->info('4. 进入 Service');                                                                                                                                  
+                                                                                                                                                                                   
+          return [                                                                                                                                                                 
+              'step' => 'service done',                                                                                                                                            
+          ];                                                                                                                                                                       
+      }                                                                                                                                                                            
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 3）中间件                                                                                                                                                                     
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  namespace App\Middleware;                                                                                                                                                        
+                                                                                                                                                                                   
+  use Psr\Http\Message\ResponseInterface;                                                                                                                                          
+  use Psr\Http\Message\ServerRequestInterface;                                                                                                                                     
+  use Psr\Http\Server\MiddlewareInterface;                                                                                                                                         
+  use Psr\Http\Server\RequestHandlerInterface;                                                                                                                                     
+  use Psr\Log\LoggerInterface;                                                                                                                                                     
+                                                                                                                                                                                   
+  class LifecycleDemoMiddleware implements MiddlewareInterface                                                                                                                     
+  {                                                                                                                                                                                
+      public function __construct(                                                                                                                                                 
+          protected LoggerInterface $logger                                                                                                                                        
+      ) {                                                                                                                                                                          
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface                                                                
+      {                                                                                                                                                                            
+          $this->logger->info('2. 中间件 before');                                                                                                                                 
+                                                                                                                                                                                   
+          $response = $handler->handle($request);                                                                                                                                  
+                                                                                                                                                                                   
+          $this->logger->info('6. 中间件 after');                                                                                                                                  
+                                                                                                                                                                                   
+          return $response;                                                                                                                                                        
+      }                                                                                                                                                                            
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 4）把中间件挂到控制器                                                                                                                                                         
+                                                                                                                                                                                   
+  比如局部中间件方式。                                                                                                                                                             
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 5）你最终观察到的日志顺序可能类似                                                                                                                                             
+                                                                                                                                                                                   
+  2. 中间件 before                                                                                                                                                                 
+  1. 进入 Controller                                                                                                                                                               
+  4. 进入 Service                                                                                                                                                                  
+  5. Controller 准备返回响应                                                                                                                                                       
+  6. 中间件 after                                                                                                                                                                  
+                                                                                                                                                                                   
+  这样你就能直观看到：                                                                                                                                                             
+                                                                                                                                                                                   
+  - 中间件 before                                                                                                                                                                  
+  - Controller                                                                                                                                                                     
+  - Service                                                                                                                                                                        
+  - Controller return                                                                                                                                                              
+  - 中间件 after                                                                                                                                                                   
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # demo 2：应用启动生命周期 demo                                                                                                                                                  
+                                                                                                                                                                                   
+  这个用事件监听最合适。                                                                                                                                                           
+                                                                                                                                                                                   
+  你前面已经接触过：                                                                                                                                                               
+                                                                                                                                                                                   
+  BootApplication                                                                                                                                                                  
+                                                                                                                                                                                   
+  所以这个 demo 非常好。                                                                                                                                                           
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 监听启动事件                                                                                                                                                                  
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  namespace App\Listener;                                                                                                                                                          
+                                                                                                                                                                                   
+  use Hyperf\Event\Annotation\Listener;                                                                                                                                            
+  use Hyperf\Framework\Event\BootApplication;                                                                                                                                      
+  use Psr\Log\LoggerInterface;                                                                                                                                                     
+                                                                                                                                                                                   
+  #[Listener]                                                                                                                                                                      
+  class BootApplicationListener                                                                                                                                                    
+  {                                                                                                                                                                                
+      public function __construct(                                                                                                                                                 
+          protected LoggerInterface $logger                                                                                                                                        
+      ) {                                                                                                                                                                          
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      public function listen(): array                                                                                                                                              
+      {                                                                                                                                                                            
+          return [                                                                                                                                                                 
+              BootApplication::class,                                                                                                                                              
+          ];                                                                                                                                                                       
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      public function process(object $event): void                                                                                                                                 
+      {                                                                                                                                                                            
+          $this->logger->info('应用启动阶段：BootApplication 事件触发');                                                                                                           
+      }                                                                                                                                                                            
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 启动服务时你会看到                                                                                                                                                            
+                                                                                                                                                                                   
+  应用启动阶段：BootApplication 事件触发                                                                                                                                           
+                                                                                                                                                                                   
+  这说明：                                                                                                                                                                         
+                                                                                                                                                                                   
+  - 容器初始化完成后                                                                                                                                                               
+  - 应用进入启动阶段事件流                                                                                                                                                         
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # demo 3：Worker 生命周期 demo                                                                                                                                                   
+                                                                                                                                                                                   
+  如果你想更深入一点，可以观察 Worker 进程启动。                                                                                                                                   
+                                                                                                                                                                                   
+  常见理解：                                                                                                                                                                       
+                                                                                                                                                                                   
+  - Master 进程                                                                                                                                                                    
+  - Manager 进程                                                                                                                                                                   
+  - Worker 进程                                                                                                                                                                    
+                                                                                                                                                                                   
+  Hy perf 基于 Swoole / Swow 这类常驻内存模型，和传统 PHP-FPM 完全不同。                                                                                                           
+                                                                                                                                                                                   
+  重点理解：                                                                                                                                                                       
+                                                                                                                                                                                   
+  > Hyperf 不是“每次请求重新加载框架”                                                                                                                                              
+  > 而是 服务启动一次，Worker 常驻内存反复处理请求。                                                                                                                               
+                                                                                                                                                                                   
+  这点特别重要。                                                                                                                                                                   
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 五、理解生命周期最重要的 3 个核心点                                                                                                                                            
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 1. Hyperf 是常驻内存                                                                                                                                                          
+                                                                                                                                                                                   
+  这决定了很多事情：                                                                                                                                                               
+                                                                                                                                                                                   
+  - 对象可能复用                                                                                                                                                                   
+  - 配置启动时就加载                                                                                                                                                               
+  - 不像 PHP-FPM 每次请求都重启                                                                                                                                                    
+  - 生命周期分“启动期”和“请求期”                                                                                                                                                   
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 2. 启动期和请求期要分开理解                                                                                                                                                   
+                                                                                                                                                                                   
+  ### 启动期                                                                                                                                                                       
+                                                                                                                                                                                   
+  更偏：                                                                                                                                                                           
+                                                                                                                                                                                   
+  - 容器                                                                                                                                                                           
+  - 配置                                                                                                                                                                           
+  - 事件                                                                                                                                                                           
+  - server 初始化                                                                                                                                                                  
+                                                                                                                                                                                   
+  ### 请求期                                                                                                                                                                       
+                                                                                                                                                                                   
+  更偏：                                                                                                                                                                           
+                                                                                                                                                                                   
+  - 路由                                                                                                                                                                           
+  - 中间件                                                                                                                                                                         
+  - 控制器                                                                                                                                                                         
+  - Service                                                                                                                                                                        
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 3. 扩展点在哪里执行要搞清楚                                                                                                                                                   
+                                                                                                                                                                                   
+  你以后学 Hyperf，很多内容本质都在问：                                                                                                                                            
+                                                                                                                                                                                   
+  > “这个能力挂在生命周期哪个阶段？”                                                                                                                                               
+                                                                                                                                                                                   
+  比如：                                                                                                                                                                           
+                                                                                                                                                                                   
+  ### 中间件                                                                                                                                                                       
+                                                                                                                                                                                   
+  挂在请求阶段                                                                                                                                                                     
+                                                                                                                                                                                   
+  ### 事件监听                                                                                                                                                                     
+                                                                                                                                                                                   
+  可能挂在启动阶段，也可能挂在运行阶段                                                                                                                                             
+                                                                                                                                                                                   
+  ### AOP                                                                                                                                                                          
+                                                                                                                                                                                   
+  挂在方法调用阶段                                                                                                                                                                 
+                                                                                                                                                                                   
+  ### 异常处理器                                                                                                                                                                   
+                                                                                                                                                                                   
+  挂在请求执行异常阶段                                                                                                                                                             
+                                                                                                                                                                                   
+  ### 依赖注入                                                                                                                                                                     
+                                                                                                                                                                                   
+  主要发生在对象创建阶段                                                                                                                                                           
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 六、如果从企业开发角度，为什么要熟悉生命周期                                                                                                                                   
+                                                                                                                                                                                   
+  因为很多问题都和生命周期有关：                                                                                                                                                   
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 1. 为什么某些配置改了不生效                                                                                                                                                   
+                                                                                                                                                                                   
+  因为配置在启动时加载了，需要重启服务。                                                                                                                                           
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 2. 为什么某些对象状态“残留”                                                                                                                                                   
+                                                                                                                                                                                   
+  因为是常驻内存，不是每次请求都重建。                                                                                                                                             
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 3. 为什么中间件能统一处理请求                                                                                                                                                 
+                                                                                                                                                                                   
+  因为它处在 Controller 前后。                                                                                                                                                     
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 4. 为什么事件监听适合做启动逻辑                                                                                                                                               
+                                                                                                                                                                                   
+  因为它挂在 BootApplication / WorkerStart 等阶段。                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 5. 为什么某些代码不能随便写成单例状态                                                                                                                                         
+                                                                                                                                                                                   
+  因为 Worker 常驻内存下会污染后续请求。                                                                                                                                           
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 七、你怎么真正学熟                                                                                                                                                             
+                                                                                                                                                                                   
+  最有效的方法：                                                                                                                                                                   
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 第一步：画一条自己的生命周期线                                                                                                                                                
+                                                                                                                                                                                   
+  你可以先记成这样：                                                                                                                                                               
+                                                                                                                                                                                   
+  服务启动                                                                                                                                                                         
+  -> 配置加载                                                                                                                                                                      
+  -> 容器初始化                                                                                                                                                                    
+  -> BootApplication                                                                                                                                                               
+  -> Worker 启动                                                                                                                                                                   
+  -> 等待请求                                                                                                                                                                      
+                                                                                                                                                                                   
+  请求进入                                                                                                                                                                         
+  -> 路由匹配                                                                                                                                                                      
+  -> 中间件 before                                                                                                                                                                 
+  -> Controller                                                                                                                                                                    
+  -> Service                                                                                                                                                                       
+  -> Response                                                                                                                                                                      
+  -> 中间件 after                                                                                                                                                                  
+  -> 返回客户端                                                                                                                                                                    
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 第二步：每个阶段都打日志                                                                                                                                                      
+                                                                                                                                                                                   
+  这是最快的方法。                                                                                                                                                                 
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 第三步：再把这些能力往上挂                                                                                                                                                    
+                                                                                                                                                                                   
+  你把你学过的东西挂上去：                                                                                                                                                         
+                                                                                                                                                                                   
+  - DI 在哪里                                                                                                                                                                      
+  - 中间件在哪里                                                                                                                                                                   
+  - AOP 在哪里                                                                                                                                                                     
+  - 异常处理器在哪里                                                                                                                                                               
+  - 事件监听在哪里                                                                                                                                                                 
+  - Redis / DB 调用在哪里                                                                                                                                                          
+                                                                                                                                                                                   
+  这样你就通了。                                                                                                                                                                   
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 八、最推荐你继续补的 demo                                                                                                                                                      
+                                                                                                                                                                                   
+  如果你真想吃透，我建议下一步直接补这三份：                                                                                                                                       
+                                                                                                                                                                                   
+  1. Hy perf 生命周期完整 demo 文档                                                                                                                                                
+  2. 应用启动阶段 / 请求阶段日志版 demo                                                                                                                                            
+  3. 生命周期 + 中间件 + 事件 + AOP 对照文档                                                                                                                                       
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 九、一句话总结                                                                                                                                                                 
+                                                                                                                                                                                   
+  > 学 Hyperf 生命周期，最好的方式不是背定义，而是自己做一个“启动阶段 + 请求阶段”的打日志 demo，把中间件、Controller、                                                             
+  > Service、事件监听按顺序跑出来。
+
+
+
+# 一、Hyperf 容器 / DI 生命周期                                                                                                                                                  
+                                                                                                                                                                                   
+  这个非常重要，因为很多人学 Hyperf 生命周期时，其实真正没搞懂的是：                                                                                                               
+                                                                                                                                                                                   
+  > 对象什么时候创建？谁创建？创建一次还是多次？为什么有些状态会残留？                                                                                                             
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 1. 容器是什么                                                                                                                                                                 
+                                                                                                                                                                                   
+  Hy perf 里的容器，你可以先理解成：                                                                                                                                               
+                                                                                                                                                                                   
+  > 一个统一负责创建、管理、注入对象的工厂系统                                                                                                                                     
+                                                                                                                                                                                   
+  比如你写：                                                                                                                                                                       
+                                                                                                                                                                                   
+  public function __construct(                                                                                                                                                     
+      protected UserService $userService                                                                                                                                           
+  ) {                                                                                                                                                                              
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  不是你自己 new UserService()，                                                                                                                                                   
+  而是 Hy perf 容器 帮你：                                                                                                                                                         
+                                                                                                                                                                                   
+  - 找到 UserService                                                                                                                                                               
+  - 分析构造函数依赖                                                                                                                                                               
+  - 把依赖对象递归创建出来                                                                                                                                                         
+  - 最后注入到当前类                                                                                                                                                               
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 2. DI 是什么                                                                                                                                                                  
+                                                                                                                                                                                   
+  DI = Dependency Injection，依赖注入。                                                                                                                                            
+                                                                                                                                                                                   
+  就是：                                                                                                                                                                           
+                                                                                                                                                                                   
+  > 当前类需要什么依赖，不自己 new，而是交给容器注入。                                                                                                                             
+                                                                                                                                                                                   
+  例如：                                                                                                                                                                           
+                                                                                                                                                                                   
+  class OrderController                                                                                                                                                            
+  {                                                                                                                                                                                
+      public function __construct(                                                                                                                                                 
+          protected OrderService $service                                                                                                                                          
+      ) {                                                                                                                                                                          
+      }                                                                                                                                                                            
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  这里 OrderController 依赖 OrderService，                                                                                                                                         
+  Hy perf 容器负责把它注入进来。                                                                                                                                                   
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 3. 容器 / DI 生命周期放在 Hyperf 生命周期哪里                                                                                                                                 
+                                                                                                                                                                                   
+  它主要发生在：                                                                                                                                                                   
+                                                                                                                                                                                   
+  应用启动阶段 + 对象创建阶段                                                                                                                                                      
+                                                                                                                                                                                   
+  可以理解成：                                                                                                                                                                     
+                                                                                                                                                                                   
+  ### 启动阶段                                                                                                                                                                     
+                                                                                                                                                                                   
+  - 容器初始化                                                                                                                                                                     
+  - 定义依赖关系                                                                                                                                                                   
+  - 扫描注解 / 属性 / 代理                                                                                                                                                         
+  - 构建对象定义信息                                                                                                                                                               
+                                                                                                                                                                                   
+  ### 请求阶段                                                                                                                                                                     
+                                                                                                                                                                                   
+  - 当某个对象第一次需要被使用时，由容器创建                                                                                                                                       
+  - 然后再注入到 Controller / Service / Middleware / Listener / Aspect                                                                                                             
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 4. 容器创建对象的大致过程                                                                                                                                                     
+                                                                                                                                                                                   
+  你可以这样理解：                                                                                                                                                                 
+                                                                                                                                                                                   
+  请求进入                                                                                                                                                                         
+  -> 路由命中 Controller                                                                                                                                                           
+  -> 容器发现需要 Controller 实例                                                                                                                                                  
+  -> 检查 Controller 构造函数依赖                                                                                                                                                  
+  -> 继续创建 Service                                                                                                                                                              
+  -> 检查 Service 依赖                                                                                                                                                             
+  -> 继续创建 Repository / Logger / Redis ...                                                                                                                                      
+  -> 全部准备好后注入                                                                                                                                                              
+  -> Controller 开始执行                                                                                                                                                           
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 5. 为什么说容器生命周期和常驻内存有关                                                                                                                                         
+                                                                                                                                                                                   
+  Hy perf 是常驻内存框架。                                                                                                                                                         
+                                                                                                                                                                                   
+  这意味着：                                                                                                                                                                       
+                                                                                                                                                                                   
+  - 容器不是每个请求都重新初始化                                                                                                                                                   
+  - 一些对象可能在 Worker 生命周期内长期存在                                                                                                                                       
+  - 不是 PHP-FPM 那种“请求结束一切销毁”                                                                                                                                            
+                                                                                                                                                                                   
+  所以你要特别注意：                                                                                                                                                               
+                                                                                                                                                                                   
+  > 被容器管理的对象，不要随便在属性里缓存“请求级状态”                                                                                                                             
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 6. 企业里最容易误解的地方                                                                                                                                                     
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ### 误区 1：以为每次请求都会重新 new 一切                                                                                                                                        
+                                                                                                                                                                                   
+  不对。                                                                                                                                                                           
+                                                                                                                                                                                   
+  在 Hy perf 常驻内存模型下，很多对象不是按 FPM 思维工作的。                                                                                                                       
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ### 误区 2：在 Service 属性里存请求数据                                                                                                                                          
+                                                                                                                                                                                   
+  比如：                                                                                                                                                                           
+                                                                                                                                                                                   
+  class UserService                                                                                                                                                                
+  {                                                                                                                                                                                
+      protected array $currentUser = [];                                                                                                                                           
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  然后每次请求都往这个属性里塞数据。                                                                                                                                               
+                                                                                                                                                                                   
+  这很危险，因为：                                                                                                                                                                 
+                                                                                                                                                                                   
+  - Worker 常驻                                                                                                                                                                    
+  - 对象可能复用                                                                                                                                                                   
+  - 状态可能串请求                                                                                                                                                                 
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ### 误区 3：把容器对象当成纯无状态没问题，实际偷偷加了状态                                                                                                                       
+                                                                                                                                                                                   
+  比如：                                                                                                                                                                           
+                                                                                                                                                                                   
+  protected ?string $token = null;                                                                                                                                                 
+                                                                                                                                                                                   
+  如果这个 token 是某次请求特有的，就不该放成员属性里长期存。                                                                                                                      
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 7. 容器 / DI 生命周期的正确理解                                                                                                                                               
+                                                                                                                                                                                   
+  你可以这样记：                                                                                                                                                                   
+                                                                                                                                                                                   
+  ### 容器生命周期                                                                                                                                                                 
+                                                                                                                                                                                   
+  偏长，接近应用 / Worker 生命周期                                                                                                                                                 
+                                                                                                                                                                                   
+  ### 请求数据生命周期                                                                                                                                                             
+                                                                                                                                                                                   
+  偏短，只在单次请求期间有效                                                                                                                                                       
+                                                                                                                                                                                   
+  ### 正确原则                                                                                                                                                                     
+                                                                                                                                                                                   
+  - 容器对象尽量无状态                                                                                                                                                             
+  - 请求态数据放请求上下文 / 参数 / Context                                                                                                                                        
+  - 不要乱放进单例属性                                                                                                                                                             
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 8. 容器在企业开发里最常见的作用                                                                                                                                               
+                                                                                                                                                                                   
+  ### Controller 注入 Service                                                                                                                                                      
+                                                                                                                                                                                   
+  public function __construct(                                                                                                                                                     
+      protected OrderService $service                                                                                                                                              
+  ) {                                                                                                                                                                              
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ### Service 注入 Repository                                                                                                                                                      
+                                                                                                                                                                                   
+  public function __construct(                                                                                                                                                     
+      protected OrderRepository $repository                                                                                                                                        
+  ) {                                                                                                                                                                              
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ### 注入 Logger / Redis / Config                                                                                                                                                 
+                                                                                                                                                                                   
+  public function __construct(                                                                                                                                                     
+      protected LoggerInterface $logger,                                                                                                                                           
+      protected RedisService $redisService                                                                                                                                         
+  ) {                                                                                                                                                                              
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ### 接口绑定实现类                                                                                                                                                               
+                                                                                                                                                                                   
+  return [                                                                                                                                                                         
+      OrderRepositoryInterface::class => OrderRepository::class,                                                                                                                   
+  ];                                                                                                                                                                               
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 9. 容器生命周期一句话总结                                                                                                                                                     
+                                                                                                                                                                                   
+  > Hy perf 容器负责对象创建和依赖注入，容器本身偏长生命周期，而请求数据偏短生命周期，所以容器对象尽量无状态。                                                                     
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 二、Swoole / Worker / 常驻内存风险点                                                                                                                                           
+                                                                                                                                                                                   
+  这个也是 Hyperf 真正和传统 PHP 最大差别之一。                                                                                                                                    
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 1. 先一句话理解                                                                                                                                                               
+                                                                                                                                                                                   
+  传统 PHP-FPM：                                                                                                                                                                   
+                                                                                                                                                                                   
+  > 请求来一次，脚本跑一次，请求结束，内存基本释放                                                                                                                                 
+                                                                                                                                                                                   
+  Hy perf / Swoole：                                                                                                                                                               
+                                                                                                                                                                                   
+  > 服务启动后，Worker 常驻内存，多次请求复用同一个进程                                                                                                                            
+                                                                                                                                                                                   
+  所以你必须切换思维。                                                                                                                                                             
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 2. Worker 是什么                                                                                                                                                              
+                                                                                                                                                                                   
+  可以粗略理解成：                                                                                                                                                                 
+                                                                                                                                                                                   
+  > 一个长期存活、持续处理请求的工作进程                                                                                                                                           
+                                                                                                                                                                                   
+  启动后：                                                                                                                                                                         
+                                                                                                                                                                                   
+  - Worker 不会因为一个请求结束就退出                                                                                                                                              
+  - 它会继续处理下一个请求                                                                                                                                                         
+  - 期间内存状态可能持续存在                                                                                                                                                       
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 3. 常驻内存最大的风险是什么                                                                                                                                                   
+                                                                                                                                                                                   
+  > 状态污染                                                                                                                                                                       
+                                                                                                                                                                                   
+  也就是：                                                                                                                                                                         
+                                                                                                                                                                                   
+  - 上一次请求的数据                                                                                                                                                               
+  - 错误缓存到对象属性                                                                                                                                                             
+  - 静态变量中的状态                                                                                                                                                               
+  - 单例里没清理的字段                                                                                                                                                             
+                                                                                                                                                                                   
+  可能影响下一次请求。                                                                                                                                                             
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 4. 最典型风险点                                                                                                                                                               
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ### 风险 1：静态变量保存请求数据                                                                                                                                                 
+                                                                                                                                                                                   
+  class Demo                                                                                                                                                                       
+  {                                                                                                                                                                                
+      public static array $data = [];                                                                                                                                              
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  请求 A：                                                                                                                                                                         
+                                                                                                                                                                                   
+  Demo::$data['user_id'] = 1;                                                                                                                                                      
+                                                                                                                                                                                   
+  请求 B 进来时，这个数据可能还在。                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ### 风险 2：对象属性保存请求态数据                                                                                                                                               
+                                                                                                                                                                                   
+  class UserService                                                                                                                                                                
+  {                                                                                                                                                                                
+      protected ?int $userId = null;                                                                                                                                               
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  如果你把当前请求用户 ID 存这里，下一次请求可能读到旧值。                                                                                                                         
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ### 风险 3：单例缓存脏状态                                                                                                                                                       
+                                                                                                                                                                                   
+  比如你以为只是“临时记一下”：                                                                                                                                                     
+                                                                                                                                                                                   
+  protected array $params = [];                                                                                                                                                    
+                                                                                                                                                                                   
+  结果下一次请求没清干净。                                                                                                                                                         
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ### 风险 4：内存泄漏                                                                                                                                                             
+                                                                                                                                                                                   
+  长时间运行的 Worker，如果不断积累对象、数组、缓存，而不释放，内存会越来越高。                                                                                                    
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ### 风险 5：错误使用全局变量                                                                                                                                                     
+                                                                                                                                                                                   
+  例如：                                                                                                                                                                           
+                                                                                                                                                                                   
+  - 全局数组                                                                                                                                                                       
+  - static 缓存                                                                                                                                                                    
+  - 不可控共享状态                                                                                                                                                                 
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 5. 企业里怎么规避这些问题                                                                                                                                                     
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ### 原则 1：Service / Repository 尽量无状态                                                                                                                                      
+                                                                                                                                                                                   
+  最重要。                                                                                                                                                                         
+                                                                                                                                                                                   
+  不要这样：                                                                                                                                                                       
+                                                                                                                                                                                   
+  class OrderService                                                                                                                                                               
+  {                                                                                                                                                                                
+      protected array $currentOrder = [];                                                                                                                                          
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  尽量让方法入参、返回值承载状态。                                                                                                                                                 
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ### 原则 2：请求数据放 Request / Context / 参数里                                                                                                                                
+                                                                                                                                                                                   
+  例如：                                                                                                                                                                           
+                                                                                                                                                                                   
+  - 当前用户信息                                                                                                                                                                   
+  - trace id                                                                                                                                                                       
+  - token                                                                                                                                                                          
+  - request id                                                                                                                                                                     
+                                                                                                                                                                                   
+  不要挂在单例对象成员属性里。                                                                                                                                                     
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ### 原则 3：不要滥用静态变量                                                                                                                                                     
+                                                                                                                                                                                   
+  特别是请求相关数据。                                                                                                                                                             
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ### 原则 4：长生命周期缓存要可控                                                                                                                                                 
+                                                                                                                                                                                   
+  如果你确实要缓存，必须明确：                                                                                                                                                     
+                                                                                                                                                                                   
+  - 缓存什么                                                                                                                                                                       
+  - 生命周期多长                                                                                                                                                                   
+  - 是否线程/协程安全                                                                                                                                                              
+  - 是否需要清理                                                                                                                                                                   
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ### 原则 5：定期观察内存                                                                                                                                                         
+                                                                                                                                                                                   
+  企业里要看：                                                                                                                                                                     
+                                                                                                                                                                                   
+  - Worker 内存是否持续上涨                                                                                                                                                        
+  - 是否有异常对象积累                                                                                                                                                             
+  - 是否有大数组常驻                                                                                                                                                               
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 6. 企业里常见现象和根因                                                                                                                                                       
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ### 现象 1：某用户数据串到另一个用户                                                                                                                                             
+                                                                                                                                                                                   
+  通常是：                                                                                                                                                                         
+                                                                                                                                                                                   
+  - 静态变量                                                                                                                                                                       
+  - 单例属性                                                                                                                                                                       
+  - Context 使用不当                                                                                                                                                               
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ### 现象 2：服务跑久了内存越来越高                                                                                                                                               
+                                                                                                                                                                                   
+  通常是：                                                                                                                                                                         
+                                                                                                                                                                                   
+  - 内存泄漏                                                                                                                                                                       
+  - 大对象引用没释放                                                                                                                                                               
+  - 自定义缓存无限增长                                                                                                                                                             
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ### 现象 3：本地调试正常，线上高并发异常                                                                                                                                         
+                                                                                                                                                                                   
+  通常是：                                                                                                                                                                         
+                                                                                                                                                                                   
+  - 并发下共享状态污染                                                                                                                                                             
+  - 协程上下文理解错误                                                                                                                                                             
+  - 锁 / 竞态问题                                                                                                                                                                  
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 7. 你怎么快速形成正确思维                                                                                                                                                     
+                                                                                                                                                                                   
+  记住这三句：                                                                                                                                                                     
+                                                                                                                                                                                   
+  ### 1）                                                                                                                                                                          
+                                                                                                                                                                                   
+  > Worker 是长期活着的，不是请求级别的                                                                                                                                            
+                                                                                                                                                                                   
+  ### 2）                                                                                                                                                                          
+                                                                                                                                                                                   
+  > 请求态数据不能乱放到长生命周期对象里                                                                                                                                           
+                                                                                                                                                                                   
+  ### 3）                                                                                                                                                                          
+                                                                                                                                                                                   
+  > Hy perf 开发要默认按“无状态服务”思维写代码                                                                                                                                     
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 8. 企业里最推荐的开发习惯                                                                                                                                                     
+                                                                                                                                                                                   
+  - Controller 无状态                                                                                                                                                              
+  - Service 无状态                                                                                                                                                                 
+  - Repository 无状态                                                                                                                                                              
+  - 请求数据只通过参数传递                                                                                                                                                         
+  - 需要请求上下文时用 Context / Request                                                                                                                                           
+  - 少用 static 保存动态状态                                                                                                                                                       
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 三、你可以把这两块挂回生命周期里                                                                                                                                               
+                                                                                                                                                                                   
+  ## 容器 / DI 生命周期                                                                                                                                                            
+                                                                                                                                                                                   
+  偏：                                                                                                                                                                             
+                                                                                                                                                                                   
+  启动阶段 + 对象创建阶段                                                                                                                                                          
+                                                                                                                                                                                   
+  ## Worker / 常驻内存风险                                                                                                                                                         
+                                                                                                                                                                                   
+  偏：                                                                                                                                                                             
+                                                                                                                                                                                   
+  进程生命周期 / Worker 生命周期                                                                                                                                                   
+                                                                                                                                                                                   
+  ## 请求数据                                                                                                                                                                      
+                                                                                                                                                                                   
+  偏：                                                                                                                                                                             
+                                                                                                                                                                                   
+  单次请求生命周期 / 协程上下文                                                                                                                                                    
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 四、一句话总总结                                                                                                                                                               
+                                                                                                                                                                                   
+  > Hy perf 容器负责创建对象，Worker 长期存活，请求数据生命周期很短，所以企业开发中最关键的原则是：容器对象尽量无状态，请求数据不要污染常驻内存对象。
+
+
+• 可以，下面直接给你 Hy perf 请求上下文 / Context 实战 demo，终端里直接看代码。                                                                                                    
+                                                                                                                                                                                   
+  这个 demo 目标是让你理解：                                                                                                                                                       
+                                                                                                                                                                                   
+  - 什么是 Context                                                                                                                                                                 
+  - 为什么它适合存“当前请求级数据”                                                                                                                                                 
+  - 为什么比静态变量安全                                                                                                                                                           
+  - 怎么在中间件里写入，在 Controller / Service 里读取                                                                                                                             
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 一、先理解 Context 是干嘛的                                                                                                                                                    
+                                                                                                                                                                                   
+  在 Hy perf 里，Context 你可以先理解成：                                                                                                                                          
+                                                                                                                                                                                   
+  > 当前协程 / 当前请求专属的数据容器                                                                                                                                              
+                                                                                                                                                                                   
+  适合放：                                                                                                                                                                         
+                                                                                                                                                                                   
+  - 当前请求 ID                                                                                                                                                                    
+  - 当前用户 ID                                                                                                                                                                    
+  - traceId                                                                                                                                                                        
+  - token 解析结果                                                                                                                                                                 
+  - 当前请求中间件算出来的临时数据                                                                                                                                                 
+                                                                                                                                                                                   
+  它的核心价值是：                                                                                                                                                                 
+                                                                                                                                                                                   
+  > 请求之间不会串数据                                                                                                                                                             
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 二、最小实战思路                                                                                                                                                               
+                                                                                                                                                                                   
+  我们做一套：                                                                                                                                                                     
+                                                                                                                                                                                   
+  中间件                                                                                                                                                                           
+  -> 往 Context 写 request_id / current_user_id                                                                                                                                    
+                                                                                                                                                                                   
+  Controller                                                                                                                                                                       
+  -> 从 Context 读 request_id                                                                                                                                                      
+                                                                                                                                                                                   
+  Service                                                                                                                                                                          
+  -> 从 Context 读 current_user_id                                                                                                                                                 
+                                                                                                                                                                                   
+  这样你就能直观看到：                                                                                                                                                             
+                                                                                                                                                                                   
+  - 请求级数据可以跨层传                                                                                                                                                           
+  - 不需要静态变量                                                                                                                                                                 
+  - 不需要乱塞单例属性                                                                                                                                                             
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 三、代码                                                                                                                                                                       
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 1）中间件：写入 Context                                                                                                                                                       
+                                                                                                                                                                                   
+  文件：app/Middleware/RequestContextDemoMiddleware.php                                                                                                                            
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  namespace App\Middleware;                                                                                                                                                        
+                                                                                                                                                                                   
+  use Hyperf\Context\Context;                                                                                                                                                      
+  use Psr\Http\Message\ResponseInterface;                                                                                                                                          
+  use Psr\Http\Message\ServerRequestInterface;                                                                                                                                     
+  use Psr\Http\Server\MiddlewareInterface;                                                                                                                                         
+  use Psr\Http\Server\RequestHandlerInterface;                                                                                                                                     
+  use Psr\Log\LoggerInterface;                                                                                                                                                     
+                                                                                                                                                                                   
+  class RequestContextDemoMiddleware implements MiddlewareInterface                                                                                                                
+  {                                                                                                                                                                                
+      public function __construct(                                                                                                                                                 
+          protected LoggerInterface $logger                                                                                                                                        
+      ) {                                                                                                                                                                          
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface                                                                
+      {                                                                                                                                                                            
+          // 模拟当前请求唯一 ID                                                                                                                                                   
+          $requestId = uniqid('req_', true);                                                                                                                                       
+                                                                                                                                                                                   
+          // 模拟当前登录用户 ID                                                                                                                                                   
+          $currentUserId = 1001;                                                                                                                                                   
+                                                                                                                                                                                   
+          // 写入协程上下文                                                                                                                                                        
+          Context::set('request_id', $requestId);                                                                                                                                  
+          Context::set('current_user_id', $currentUserId);                                                                                                                         
+                                                                                                                                                                                   
+          $this->logger->info('Context middleware before', [                                                                                                                       
+              'request_id' => $requestId,                                                                                                                                          
+              'current_user_id' => $currentUserId,                                                                                                                                 
+          ]);                                                                                                                                                                      
+                                                                                                                                                                                   
+          $response = $handler->handle($request);                                                                                                                                  
+                                                                                                                                                                                   
+          $this->logger->info('Context middleware after', [                                                                                                                        
+              'request_id' => Context::get('request_id'),                                                                                                                          
+              'current_user_id' => Context::get('current_user_id'),                                                                                                                
+          ]);                                                                                                                                                                      
+                                                                                                                                                                                   
+          return $response;                                                                                                                                                        
+      }                                                                                                                                                                            
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 2）Service：读取 Context                                                                                                                                                      
+                                                                                                                                                                                   
+  文件：app/Service/RequestContextDemoService.php                                                                                                                                  
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  namespace App\Service;                                                                                                                                                           
+                                                                                                                                                                                   
+  use Hyperf\Context\Context;                                                                                                                                                      
+  use Psr\Log\LoggerInterface;                                                                                                                                                     
+                                                                                                                                                                                   
+  class RequestContextDemoService                                                                                                                                                  
+  {                                                                                                                                                                                
+      public function __construct(                                                                                                                                                 
+          protected LoggerInterface $logger                                                                                                                                        
+      ) {                                                                                                                                                                          
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      public function handle(): array                                                                                                                                              
+      {                                                                                                                                                                            
+          $requestId = Context::get('request_id');                                                                                                                                 
+          $currentUserId = Context::get('current_user_id');                                                                                                                        
+                                                                                                                                                                                   
+          $this->logger->info('Service read context', [                                                                                                                            
+              'request_id' => $requestId,                                                                                                                                          
+              'current_user_id' => $currentUserId,                                                                                                                                 
+          ]);                                                                                                                                                                      
+                                                                                                                                                                                   
+          return [                                                                                                                                                                 
+              'request_id' => $requestId,                                                                                                                                          
+              'current_user_id' => $currentUserId,                                                                                                                                 
+              'message' => 'Context read success',                                                                                                                                 
+          ];                                                                                                                                                                       
+      }                                                                                                                                                                            
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 3）Controller：读取 Context + 调 Service                                                                                                                                      
+                                                                                                                                                                                   
+  文件：app/Controller/RequestContextDemoController.php                                                                                                                            
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  namespace App\Controller;                                                                                                                                                        
+                                                                                                                                                                                   
+  use App\Service\RequestContextDemoService;                                                                                                                                       
+  use Hyperf\Context\Context;                                                                                                                                                      
+  use Hyperf\HttpServer\Annotation\Controller;                                                                                                                                     
+  use Hyperf\HttpServer\Annotation\GetMapping;                                                                                                                                     
+  use Psr\Log\LoggerInterface;                                                                                                                                                     
+                                                                                                                                                                                   
+  #[Controller(prefix: 'context-demo')]                                                                                                                                            
+  class RequestContextDemoController                                                                                                                                               
+  {                                                                                                                                                                                
+      public function __construct(                                                                                                                                                 
+          protected LoggerInterface $logger,                                                                                                                                       
+          protected RequestContextDemoService $service                                                                                                                             
+      ) {                                                                                                                                                                          
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      #[GetMapping('test')]                                                                                                                                                        
+      public function test(): array                                                                                                                                                
+      {                                                                                                                                                                            
+          $requestId = Context::get('request_id');                                                                                                                                 
+                                                                                                                                                                                   
+          $this->logger->info('Controller read context', [                                                                                                                         
+              'request_id' => $requestId,                                                                                                                                          
+          ]);                                                                                                                                                                      
+                                                                                                                                                                                   
+          $result = $this->service->handle();                                                                                                                                      
+                                                                                                                                                                                   
+          return [                                                                                                                                                                 
+              'code' => 0,                                                                                                                                                         
+              'message' => 'success',                                                                                                                                              
+              'data' => $result,                                                                                                                                                   
+          ];                                                                                                                                                                       
+      }                                                                                                                                                                            
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 4）中间件挂载配置                                                                                                                                                             
+                                                                                                                                                                                   
+  文件：config/autoload/middlewares-request-context-demo.php                                                                                                                       
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  return [                                                                                                                                                                         
+      'http' => [                                                                                                                                                                  
+          App\Middleware\RequestContextDemoMiddleware::class,                                                                                                                      
+      ],                                                                                                                                                                           
+  ];                                                                                                                                                                               
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 四、请求测试                                                                                                                                                                   
+                                                                                                                                                                                   
+  接口：                                                                                                                                                                           
+                                                                                                                                                                                   
+  GET /context-demo/test                                                                                                                                                           
+                                                                                                                                                                                   
+  例如：                                                                                                                                                                           
+                                                                                                                                                                                   
+  curl http://127.0.0.1:9501/context-demo/test                                                                                                                                     
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 五、预期返回                                                                                                                                                                   
+                                                                                                                                                                                   
+  {                                                                                                                                                                                
+    "code": 0,                                                                                                                                                                     
+    "message": "success",                                                                                                                                                          
+    "data": {                                                                                                                                                                      
+      "request_id": "req_6816f0f7d8d5b1.23456789",                                                                                                                                 
+      "current_user_id": 1001,                                                                                                                                                     
+      "message": "Context read success"                                                                                                                                            
+    }                                                                                                                                                                              
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 六、预期日志顺序                                                                                                                                                               
+                                                                                                                                                                                   
+  Context middleware before                                                                                                                                                        
+  Controller read context                                                                                                                                                          
+  Service read context                                                                                                                                                             
+  Context middleware after                                                                                                                                                         
+                                                                                                                                                                                   
+  并且日志里的：                                                                                                                                                                   
+                                                                                                                                                                                   
+  - request_id                                                                                                                                                                     
+  - current_user_id                                                                                                                                                                
+                                                                                                                                                                                   
+  应该是一致的。                                                                                                                                                                   
+                                                                                                                                                                                   
+  这就说明：                                                                                                                                                                       
+                                                                                                                                                                                   
+  > 同一个请求内，中间件写入的 Context，Controller 和 Service 都能拿到。                                                                                                           
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 七、这个 demo 的核心意义                                                                                                                                                       
+                                                                                                                                                                                   
+  它主要解决一个企业开发里非常常见的问题：                                                                                                                                         
+                                                                                                                                                                                   
+  > 当前请求的一些临时数据，要怎么跨层传递？                                                                                                                                       
+                                                                                                                                                                                   
+  比如：                                                                                                                                                                           
+                                                                                                                                                                                   
+  - 当前用户 ID                                                                                                                                                                    
+  - traceId                                                                                                                                                                        
+  - requestId                                                                                                                                                                      
+  - token 解析结果                                                                                                                                                                 
+  - 灰度标识                                                                                                                                                                       
+  - 语言环境                                                                                                                                                                       
+                                                                                                                                                                                   
+  如果不用 Context，有些人会乱写成：                                                                                                                                               
+                                                                                                                                                                                   
+  - static 变量                                                                                                                                                                    
+  - 单例属性                                                                                                                                                                       
+  - 全局变量                                                                                                                                                                       
+                                                                                                                                                                                   
+  这些在 Hyperf 常驻内存下都危险。                                                                                                                                                 
+                                                                                                                                                                                   
+  而 Context 更适合这种“请求范围内共享”的数据。                                                                                                                                    
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 八、和静态变量的区别                                                                                                                                                           
+                                                                                                                                                                                   
+  ## 错误示例                                                                                                                                                                      
+                                                                                                                                                                                   
+  class Demo                                                                                                                                                                       
+  {                                                                                                                                                                                
+      public static array $data = [];                                                                                                                                              
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  请求 A 写进去后，请求 B 可能读到，容易串。                                                                                                                                       
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 正确思路                                                                                                                                                                      
+                                                                                                                                                                                   
+  Context::set('request_id', $requestId);                                                                                                                                          
+  Context::get('request_id');                                                                                                                                                      
+                                                                                                                                                                                   
+  这样数据跟着当前协程 / 当前请求走，请求结束就结束，不容易污染其他请求。                                                                                                          
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 九、企业里最常见的 Context 用法                                                                                                                                                
+                                                                                                                                                                                   
+  ## 1. request_id / trace_id                                                                                                                                                      
+                                                                                                                                                                                   
+  链路追踪最常见。                                                                                                                                                                 
+                                                                                                                                                                                   
+  ## 2. current_user_id                                                                                                                                                            
+                                                                                                                                                                                   
+  中间件鉴权后放进去。                                                                                                                                                             
+                                                                                                                                                                                   
+  ## 3. token 解析结果                                                                                                                                                             
+                                                                                                                                                                                   
+  避免后面每层重复解析。                                                                                                                                                           
+                                                                                                                                                                                   
+  ## 4. 多租户 tenant_id                                                                                                                                                           
+                                                                                                                                                                                   
+  请求进入后就写入上下文。                                                                                                                                                         
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 十、一句话总结                                                                                                                                                                 
+                                                                                                                                                                                   
+  > Context 是 Hyperf 里最适合存“当前请求级共享数据”的地方，比静态变量和单例属性安全得多。
