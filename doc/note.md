@@ -20984,3 +20984,847 @@ HyPerf 异步队列如果走 RedisDriver，常见会用到这些 Redis 数据类
   这个实战 demo 的核心不是“延迟执行”，而是：                                                                                                                                       
                                                                                                                                                                                    
   > 到时间后重新校验订单状态，只关闭真正还未支付的订单。
+
+
+
+
+
+可以，下面直接给你一套 “订单超时关闭 + 释放库存” 升级版 demo，继续按 终端显示版 给你。                                                                                           
+                                                                                                                                                                                   
+  这个版本比前一个更像企业真实场景：                                                                                                                                               
+                                                                                                                                                                                   
+  创建订单                                                                                                                                                                         
+  -> 锁定 / 扣减可售库存                                                                                                                                                           
+  -> 订单待支付                                                                                                                                                                    
+  -> 投递延迟关闭任务                                                                                                                                                              
+  -> 到时间未支付                                                                                                                                                                  
+  -> 自动关闭订单                                                                                                                                                                  
+  -> 回补库存                                                                                                                                                                      
+  -> 记录日志                                                                                                                                                                      
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 一、这个升级版要解决什么问题                                                                                                                                                   
+                                                                                                                                                                                   
+  前一个 demo 只做了：                                                                                                                                                             
+                                                                                                                                                                                   
+  - 超时关闭订单                                                                                                                                                                   
+                                                                                                                                                                                   
+  但真实项目里一般还要：                                                                                                                                                           
+                                                                                                                                                                                   
+  - 回补库存                                                                                                                                                                       
+  - 记录关闭日志                                                                                                                                                                   
+  - 避免重复回补                                                                                                                                                                   
+  - 防止已支付订单被误关闭                                                                                                                                                         
+                                                                                                                                                                                   
+  所以这次重点是：                                                                                                                                                                 
+                                                                                                                                                                                   
+  1. 订单关闭                                                                                                                                                                      
+  2. 库存回补                                                                                                                                                                      
+  3. 幂等 / 条件更新思维                                                                                                                                                           
+  4. 企业版状态校验                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 二、建议表结构                                                                                                                                                                 
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 1）订单表 demo_delay_orders                                                                                                                                                   
+                                                                                                                                                                                   
+  和之前一致：                                                                                                                                                                     
+                                                                                                                                                                                   
+  DROP TABLE IF EXISTS `demo_delay_orders`;                                                                                                                                        
+                                                                                                                                                                                   
+  CREATE TABLE `demo_delay_orders` (                                                                                                                                               
+    `id` bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '主键ID',                                                                                                                 
+    `order_no` varchar(50) NOT NULL COMMENT '订单号',                                                                                                                              
+    `user_id` bigint unsigned NOT NULL COMMENT '用户ID',                                                                                                                           
+    `amount` decimal(10,2) NOT NULL DEFAULT '0.00' COMMENT '订单金额',                                                                                                             
+    `status` tinyint NOT NULL DEFAULT '1' COMMENT '状态：1待支付 2已支付 3已关闭',                                                                                                 
+    `created_at` datetime DEFAULT NULL COMMENT '创建时间',                                                                                                                         
+    `updated_at` datetime DEFAULT NULL COMMENT '更新时间',                                                                                                                         
+    PRIMARY KEY (`id`),                                                                                                                                                            
+    UNIQUE KEY `uk_order_no` (`order_no`)                                                                                                                                          
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='延迟关闭订单 Demo 表';                                                                                                          
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 2）库存表 demo_delay_inventory                                                                                                                                                
+                                                                                                                                                                                   
+  DROP TABLE IF EXISTS `demo_delay_inventory`;                                                                                                                                     
+                                                                                                                                                                                   
+  CREATE TABLE `demo_delay_inventory` (                                                                                                                                            
+    `id` bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '主键ID',                                                                                                                 
+    `sku_id` bigint unsigned NOT NULL COMMENT '商品SKU ID',                                                                                                                        
+    `stock` int NOT NULL DEFAULT 0 COMMENT '当前库存',                                                                                                                             
+    `created_at` datetime DEFAULT NULL COMMENT '创建时间',                                                                                                                         
+    `updated_at` datetime DEFAULT NULL COMMENT '更新时间',                                                                                                                         
+    PRIMARY KEY (`id`),                                                                                                                                                            
+    UNIQUE KEY `uk_sku_id` (`sku_id`)                                                                                                                                              
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='延迟关闭订单库存表';                                                                                                            
+                                                                                                                                                                                   
+  初始化一条库存：                                                                                                                                                                 
+                                                                                                                                                                                   
+  INSERT INTO `demo_delay_inventory` (`sku_id`, `stock`, `created_at`, `updated_at`)                                                                                               
+  VALUES (1001, 10, NOW(), NOW());                                                                                                                                                 
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 3）订单日志表 demo_delay_order_logs                                                                                                                                           
+                                                                                                                                                                                   
+  DROP TABLE IF EXISTS `demo_delay_order_logs`;                                                                                                                                    
+                                                                                                                                                                                   
+  CREATE TABLE `demo_delay_order_logs` (                                                                                                                                           
+    `id` bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '主键ID',                                                                                                                 
+    `order_no` varchar(50) NOT NULL COMMENT '订单号',                                                                                                                              
+    `content` varchar(255) NOT NULL COMMENT '日志内容',                                                                                                                            
+    `created_at` datetime DEFAULT NULL COMMENT '创建时间',                                                                                                                         
+    `updated_at` datetime DEFAULT NULL COMMENT '更新时间',                                                                                                                         
+    PRIMARY KEY (`id`),                                                                                                                                                            
+    KEY `idx_order_no` (`order_no`)                                                                                                                                                
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='延迟关闭订单日志表';                                                                                                            
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 三、Model                                                                                                                                                                      
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 1）app/Model/DemoDelayOrder.php                                                                                                                                               
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  namespace App\Model;                                                                                                                                                             
+                                                                                                                                                                                   
+  use Hyperf\DbConnection\Model\Model;                                                                                                                                             
+                                                                                                                                                                                   
+  class DemoDelayOrder extends Model                                                                                                                                               
+  {                                                                                                                                                                                
+      protected ?string $table = 'demo_delay_orders';                                                                                                                              
+                                                                                                                                                                                   
+      protected array $fillable = [                                                                                                                                                
+          'order_no',                                                                                                                                                              
+          'user_id',                                                                                                                                                               
+          'amount',                                                                                                                                                                
+          'status',                                                                                                                                                                
+          'created_at',                                                                                                                                                            
+          'updated_at',                                                                                                                                                            
+      ];                                                                                                                                                                           
+                                                                                                                                                                                   
+      protected array $casts = [                                                                                                                                                   
+          'id' => 'integer',                                                                                                                                                       
+          'user_id' => 'integer',                                                                                                                                                  
+          'amount' => 'float',                                                                                                                                                     
+          'status' => 'integer',                                                                                                                                                   
+      ];                                                                                                                                                                           
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 2）app/Model/DemoDelayInventory.php                                                                                                                                           
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  namespace App\Model;                                                                                                                                                             
+                                                                                                                                                                                   
+  use Hyperf\DbConnection\Model\Model;                                                                                                                                             
+                                                                                                                                                                                   
+  class DemoDelayInventory extends Model                                                                                                                                           
+  {                                                                                                                                                                                
+      protected ?string $table = 'demo_delay_inventory';                                                                                                                           
+                                                                                                                                                                                   
+      protected array $fillable = [                                                                                                                                                
+          'sku_id',                                                                                                                                                                
+          'stock',                                                                                                                                                                 
+          'created_at',                                                                                                                                                            
+          'updated_at',                                                                                                                                                            
+      ];                                                                                                                                                                           
+                                                                                                                                                                                   
+      protected array $casts = [                                                                                                                                                   
+          'id' => 'integer',                                                                                                                                                       
+          'sku_id' => 'integer',                                                                                                                                                   
+          'stock' => 'integer',                                                                                                                                                    
+      ];                                                                                                                                                                           
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 3）app/Model/DemoDelayOrderLog.php                                                                                                                                            
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  namespace App\Model;                                                                                                                                                             
+                                                                                                                                                                                   
+  use Hyperf\DbConnection\Model\Model;                                                                                                                                             
+                                                                                                                                                                                   
+  class DemoDelayOrderLog extends Model                                                                                                                                            
+  {                                                                                                                                                                                
+      protected ?string $table = 'demo_delay_order_logs';                                                                                                                          
+                                                                                                                                                                                   
+      protected array $fillable = [                                                                                                                                                
+          'order_no',                                                                                                                                                              
+          'content',                                                                                                                                                               
+          'created_at',                                                                                                                                                            
+          'updated_at',                                                                                                                                                            
+      ];                                                                                                                                                                           
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 四、延迟关闭 + 回补库存 Job                                                                                                                                                    
+                                                                                                                                                                                   
+  文件：app/Job/DelayCloseOrderReleaseStockJob.php                                                                                                                                 
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  namespace App\Job;                                                                                                                                                               
+                                                                                                                                                                                   
+  use App\Model\DemoDelayInventory;                                                                                                                                                
+  use App\Model\DemoDelayOrder;                                                                                                                                                    
+  use App\Model\DemoDelayOrderLog;                                                                                                                                                 
+  use Hyperf\AsyncQueue\Job;                                                                                                                                                       
+  use Hyperf\DbConnection\Db;                                                                                                                                                      
+                                                                                                                                                                                   
+  class DelayCloseOrderReleaseStockJob extends Job                                                                                                                                 
+  {                                                                                                                                                                                
+      public function __construct(                                                                                                                                                 
+          public string $orderNo,                                                                                                                                                  
+          public int $skuId,                                                                                                                                                       
+          public int $quantity                                                                                                                                                     
+      ) {                                                                                                                                                                          
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      public function handle(): void                                                                                                                                               
+      {                                                                                                                                                                            
+          var_dump('=== DelayCloseOrderReleaseStockJob handle ===');                                                                                                               
+          var_dump([                                                                                                                                                               
+              'order_no' => $this->orderNo,                                                                                                                                        
+              'sku_id' => $this->skuId,                                                                                                                                            
+              'quantity' => $this->quantity,                                                                                                                                       
+              'execute_time' => date('Y-m-d H:i:s'),                                                                                                                               
+          ]);                                                                                                                                                                      
+                                                                                                                                                                                   
+          Db::transaction(function () {                                                                                                                                            
+              $order = DemoDelayOrder::query()                                                                                                                                     
+                  ->where('order_no', $this->orderNo)                                                                                                                              
+                  ->lockForUpdate()                                                                                                                                                
+                  ->first();                                                                                                                                                       
+                                                                                                                                                                                   
+              if (! $order) {                                                                                                                                                      
+                  var_dump('订单不存在，跳过处理');                                                                                                                                
+                  return;                                                                                                                                                          
+              }                                                                                                                                                                    
+                                                                                                                                                                                   
+              // 关键校验：                                                                                                                                                        
+              // 只有待支付订单才允许关闭并回补库存                                                                                                                                
+              if ((int) $order->status !== 1) {                                                                                                                                    
+                  var_dump('订单不是待支付状态，跳过关闭和回补库存');                                                                                                              
+                  var_dump([                                                                                                                                                       
+                      'order_no' => $order->order_no,                                                                                                                              
+                      'status' => $order->status,                                                                                                                                  
+                  ]);                                                                                                                                                              
+                  return;                                                                                                                                                          
+              }                                                                                                                                                                    
+                                                                                                                                                                                   
+              $inventory = DemoDelayInventory::query()                                                                                                                             
+                  ->where('sku_id', $this->skuId)                                                                                                                                  
+                  ->lockForUpdate()                                                                                                                                                
+                  ->first();                                                                                                                                                       
+                                                                                                                                                                                   
+              if (! $inventory) {                                                                                                                                                  
+                  var_dump('库存记录不存在，跳过处理');                                                                                                                            
+                  return;                                                                                                                                                          
+              }                                                                                                                                                                    
+                                                                                                                                                                                   
+              // 1. 关闭订单                                                                                                                                                       
+              $order->status = 3;                                                                                                                                                  
+              $order->save();                                                                                                                                                      
+                                                                                                                                                                                   
+              // 2. 回补库存                                                                                                                                                       
+              $inventory->stock += $this->quantity;                                                                                                                                
+              $inventory->save();                                                                                                                                                  
+                                                                                                                                                                                   
+              // 3. 记录日志                                                                                                                                                       
+              DemoDelayOrderLog::query()->create([                                                                                                                                 
+                  'order_no' => $this->orderNo,                                                                                                                                    
+                  'content' => sprintf(                                                                                                                                            
+                      '订单超时关闭，系统回补库存成功，sku_id=%d，quantity=%d',                                                                                                    
+                      $this->skuId,                                                                                                                                                
+                      $this->quantity                                                                                                                                              
+                  ),                                                                                                                                                               
+              ]);                                                                                                                                                                  
+                                                                                                                                                                                   
+              var_dump('订单超时关闭成功，并已回补库存');                                                                                                                          
+              var_dump([                                                                                                                                                           
+                  'order_no' => $this->orderNo,                                                                                                                                    
+                  'order_status' => $order->status,                                                                                                                                
+                  'sku_id' => $this->skuId,                                                                                                                                        
+                  'restore_quantity' => $this->quantity,                                                                                                                           
+                  'left_stock' => $inventory->stock,                                                                                                                               
+              ]);                                                                                                                                                                  
+          });                                                                                                                                                                      
+      }                                                                                                                                                                            
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 五、Service                                                                                                                                                                    
+                                                                                                                                                                                   
+  文件：app/Service/DelayOrderReleaseStockDemoService.php                                                                                                                          
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  namespace App\Service;                                                                                                                                                           
+                                                                                                                                                                                   
+  use App\Job\DelayCloseOrderReleaseStockJob;                                                                                                                                      
+  use App\Model\DemoDelayInventory;                                                                                                                                                
+  use App\Model\DemoDelayOrder;                                                                                                                                                    
+  use App\Model\DemoDelayOrderLog;                                                                                                                                                 
+  use Hyperf\AsyncQueue\Driver\DriverFactory;                                                                                                                                      
+  use Hyperf\DbConnection\Db;                                                                                                                                                      
+                                                                                                                                                                                   
+  class DelayOrderReleaseStockDemoService                                                                                                                                          
+  {                                                                                                                                                                                
+      public function __construct(                                                                                                                                                 
+          protected DriverFactory $driverFactory                                                                                                                                   
+      ) {                                                                                                                                                                          
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 创建订单：扣减库存 + 创建待支付订单 + 投递延迟关闭任务                                                                                                                    
+       */                                                                                                                                                                          
+      public function createOrder(): array                                                                                                                                         
+      {                                                                                                                                                                            
+          $orderNo = 'ODS' . date('YmdHis') . mt_rand(1000, 9999);                                                                                                                 
+          $skuId = 1001;                                                                                                                                                           
+          $quantity = 2;                                                                                                                                                           
+                                                                                                                                                                                   
+          $order = Db::transaction(function () use ($orderNo, $skuId, $quantity) {                                                                                                 
+              $inventory = DemoDelayInventory::query()                                                                                                                             
+                  ->where('sku_id', $skuId)                                                                                                                                        
+                  ->lockForUpdate()                                                                                                                                                
+                  ->first();                                                                                                                                                       
+                                                                                                                                                                                   
+              if (! $inventory) {                                                                                                                                                  
+                  return [                                                                                                                                                         
+                      'code' => 404,                                                                                                                                               
+                      'message' => '库存记录不存在',                                                                                                                               
+                      'data' => null,                                                                                                                                              
+                  ];                                                                                                                                                               
+              }                                                                                                                                                                    
+                                                                                                                                                                                   
+              if ($inventory->stock < $quantity) {                                                                                                                                 
+                  return [                                                                                                                                                         
+                      'code' => 400,                                                                                                                                               
+                      'message' => '库存不足',                                                                                                                                     
+                      'data' => [                                                                                                                                                  
+                          'sku_id' => $skuId,                                                                                                                                      
+                          'stock' => $inventory->stock,                                                                                                                            
+                      ],                                                                                                                                                           
+                  ];                                                                                                                                                               
+              }                                                                                                                                                                    
+                                                                                                                                                                                   
+              // 1. 先扣减库存                                                                                                                                                     
+              $inventory->stock -= $quantity;                                                                                                                                      
+              $inventory->save();                                                                                                                                                  
+                                                                                                                                                                                   
+              // 2. 创建待支付订单                                                                                                                                                 
+              $order = DemoDelayOrder::query()->create([                                                                                                                           
+                  'order_no' => $orderNo,                                                                                                                                          
+                  'user_id' => 1001,                                                                                                                                               
+                  'amount' => 199.80,                                                                                                                                              
+                  'status' => 1,                                                                                                                                                   
+              ]);                                                                                                                                                                  
+                                                                                                                                                                                   
+              // 3. 写日志                                                                                                                                                         
+              DemoDelayOrderLog::query()->create([                                                                                                                                 
+                  'order_no' => $orderNo,                                                                                                                                          
+                  'content' => sprintf(                                                                                                                                            
+                      '创建订单成功并预扣库存，sku_id=%d，quantity=%d',                                                                                                            
+                      $skuId,                                                                                                                                                      
+                      $quantity                                                                                                                                                    
+                  ),                                                                                                                                                               
+              ]);                                                                                                                                                                  
+                                                                                                                                                                                   
+              return $order;                                                                                                                                                       
+          });                                                                                                                                                                      
+                                                                                                                                                                                   
+          if (is_array($order)) {                                                                                                                                                  
+              return $order;                                                                                                                                                       
+          }                                                                                                                                                                        
+                                                                                                                                                                                   
+          $driver = $this->driverFactory->get('default');                                                                                                                          
+                                                                                                                                                                                   
+          // Demo 延迟 15 秒自动关闭                                                                                                                                               
+          $driver->push(new DelayCloseOrderReleaseStockJob($orderNo, $skuId, $quantity), 15);                                                                                      
+                                                                                                                                                                                   
+          return [                                                                                                                                                                 
+              'code' => 0,                                                                                                                                                         
+              'message' => '订单创建成功，已投递延迟关闭任务',                                                                                                                     
+              'data' => [                                                                                                                                                          
+                  'order_no' => $orderNo,                                                                                                                                          
+                  'status' => 1,                                                                                                                                                   
+                  'sku_id' => $skuId,                                                                                                                                              
+                  'quantity' => $quantity,                                                                                                                                         
+                  'close_after_seconds' => 15,                                                                                                                                     
+              ],                                                                                                                                                                   
+          ];                                                                                                                                                                       
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 模拟支付成功                                                                                                                                                              
+       */                                                                                                                                                                          
+      public function payOrder(string $orderNo): array                                                                                                                             
+      {                                                                                                                                                                            
+          $order = DemoDelayOrder::query()                                                                                                                                         
+              ->where('order_no', $orderNo)                                                                                                                                        
+              ->first();                                                                                                                                                           
+                                                                                                                                                                                   
+          if (! $order) {                                                                                                                                                          
+              return [                                                                                                                                                             
+                  'code' => 404,                                                                                                                                                   
+                  'message' => '订单不存在',                                                                                                                                       
+                  'data' => null,                                                                                                                                                  
+              ];                                                                                                                                                                   
+          }                                                                                                                                                                        
+                                                                                                                                                                                   
+          if ((int) $order->status !== 1) {                                                                                                                                        
+              return [                                                                                                                                                             
+                  'code' => 400,                                                                                                                                                   
+                  'message' => '当前订单不是待支付状态，不能支付',                                                                                                                 
+                  'data' => [                                                                                                                                                      
+                      'order_no' => $order->order_no,                                                                                                                              
+                      'status' => $order->status,                                                                                                                                  
+                  ],                                                                                                                                                               
+              ];                                                                                                                                                                   
+          }                                                                                                                                                                        
+                                                                                                                                                                                   
+          $order->status = 2;                                                                                                                                                      
+          $order->save();                                                                                                                                                          
+                                                                                                                                                                                   
+          DemoDelayOrderLog::query()->create([                                                                                                                                     
+              'order_no' => $orderNo,                                                                                                                                              
+              'content' => '用户支付成功，订单状态更新为已支付',                                                                                                                   
+          ]);                                                                                                                                                                      
+                                                                                                                                                                                   
+          return [                                                                                                                                                                 
+              'code' => 0,                                                                                                                                                         
+              'message' => '支付成功',                                                                                                                                             
+              'data' => [                                                                                                                                                          
+                  'order_no' => $order->order_no,                                                                                                                                  
+                  'status' => $order->status,                                                                                                                                      
+              ],                                                                                                                                                                   
+          ];                                                                                                                                                                       
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 查询订单详情                                                                                                                                                              
+       */                                                                                                                                                                          
+      public function detail(string $orderNo): array                                                                                                                               
+      {                                                                                                                                                                            
+          $order = DemoDelayOrder::query()                                                                                                                                         
+              ->where('order_no', $orderNo)                                                                                                                                        
+              ->first();                                                                                                                                                           
+                                                                                                                                                                                   
+          if (! $order) {                                                                                                                                                          
+              return [                                                                                                                                                             
+                  'code' => 404,                                                                                                                                                   
+                  'message' => '订单不存在',                                                                                                                                       
+                  'data' => null,                                                                                                                                                  
+              ];                                                                                                                                                                   
+          }                                                                                                                                                                        
+                                                                                                                                                                                   
+          return [                                                                                                                                                                 
+              'code' => 0,                                                                                                                                                         
+              'message' => 'success',                                                                                                                                              
+              'data' => $order->toArray(),                                                                                                                                         
+          ];                                                                                                                                                                       
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 查询库存                                                                                                                                                                  
+       */                                                                                                                                                                          
+      public function inventoryDetail(int $skuId): array                                                                                                                           
+      {                                                                                                                                                                            
+          $inventory = DemoDelayInventory::query()                                                                                                                                 
+              ->where('sku_id', $skuId)                                                                                                                                            
+              ->first();                                                                                                                                                           
+                                                                                                                                                                                   
+          if (! $inventory) {                                                                                                                                                      
+              return [                                                                                                                                                             
+                  'code' => 404,                                                                                                                                                   
+                  'message' => '库存不存在',                                                                                                                                       
+                  'data' => null,                                                                                                                                                  
+              ];                                                                                                                                                                   
+          }                                                                                                                                                                        
+                                                                                                                                                                                   
+          return [                                                                                                                                                                 
+              'code' => 0,                                                                                                                                                         
+              'message' => 'success',                                                                                                                                              
+              'data' => $inventory->toArray(),                                                                                                                                     
+          ];                                                                                                                                                                       
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 查询订单日志                                                                                                                                                              
+       */                                                                                                                                                                          
+      public function logs(string $orderNo): array                                                                                                                                 
+      {                                                                                                                                                                            
+          return [                                                                                                                                                                 
+              'code' => 0,                                                                                                                                                         
+              'message' => 'success',                                                                                                                                              
+              'data' => DemoDelayOrderLog::query()                                                                                                                                 
+                  ->where('order_no', $orderNo)                                                                                                                                    
+                  ->orderBy('id')                                                                                                                                                  
+                  ->get()                                                                                                                                                          
+                  ->toArray(),                                                                                                                                                     
+          ];                                                                                                                                                                       
+      }                                                                                                                                                                            
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 六、Controller                                                                                                                                                                 
+                                                                                                                                                                                   
+  文件：app/Controller/DelayOrderReleaseStockDemoController.php                                                                                                                    
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  namespace App\Controller;                                                                                                                                                        
+                                                                                                                                                                                   
+  use App\Service\DelayOrderReleaseStockDemoService;                                                                                                                               
+  use Hyperf\HttpServer\Annotation\Controller;                                                                                                                                     
+  use Hyperf\HttpServer\Annotation\GetMapping;                                                                                                                                     
+  use Hyperf\HttpServer\Contract\RequestInterface;                                                                                                                                 
+                                                                                                                                                                                   
+  #[Controller(prefix: 'delay-order-stock-demo')]                                                                                                                                  
+  class DelayOrderReleaseStockDemoController                                                                                                                                       
+  {                                                                                                                                                                                
+      public function __construct(                                                                                                                                                 
+          protected DelayOrderReleaseStockDemoService $service,                                                                                                                    
+          protected RequestInterface $request                                                                                                                                      
+      ) {                                                                                                                                                                          
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      #[GetMapping('create')]                                                                                                                                                      
+      public function create(): array                                                                                                                                              
+      {                                                                                                                                                                            
+          return $this->service->createOrder();                                                                                                                                    
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      #[GetMapping('pay')]                                                                                                                                                         
+      public function pay(): array                                                                                                                                                 
+      {                                                                                                                                                                            
+          $orderNo = (string) $this->request->input('order_no', '');                                                                                                               
+                                                                                                                                                                                   
+          return $this->service->payOrder($orderNo);                                                                                                                               
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      #[GetMapping('detail')]                                                                                                                                                      
+      public function detail(): array                                                                                                                                              
+      {                                                                                                                                                                            
+          $orderNo = (string) $this->request->input('order_no', '');                                                                                                               
+                                                                                                                                                                                   
+          return $this->service->detail($orderNo);                                                                                                                                 
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      #[GetMapping('inventory')]                                                                                                                                                   
+      public function inventory(): array                                                                                                                                           
+      {                                                                                                                                                                            
+          $skuId = (int) $this->request->input('sku_id', 1001);                                                                                                                    
+                                                                                                                                                                                   
+          return $this->service->inventoryDetail($skuId);                                                                                                                          
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      #[GetMapping('logs')]                                                                                                                                                        
+      public function logs(): array                                                                                                                                                
+      {                                                                                                                                                                            
+          $orderNo = (string) $this->request->input('order_no', '');                                                                                                               
+                                                                                                                                                                                   
+          return $this->service->logs($orderNo);                                                                                                                                   
+      }                                                                                                                                                                            
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 七、测试流程                                                                                                                                                                   
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 场景 1：不支付，自动关闭并回补库存                                                                                                                                            
+                                                                                                                                                                                   
+  ### 第 1 步：先查库存                                                                                                                                                            
+                                                                                                                                                                                   
+  GET /delay-order-stock-demo/inventory?sku_id=1001                                                                                                                                
+                                                                                                                                                                                   
+  假设返回：                                                                                                                                                                       
+                                                                                                                                                                                   
+  {                                                                                                                                                                                
+    "code": 0,                                                                                                                                                                     
+    "message": "success",                                                                                                                                                          
+    "data": {                                                                                                                                                                      
+      "sku_id": 1001,                                                                                                                                                              
+      "stock": 10                                                                                                                                                                  
+    }                                                                                                                                                                              
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ### 第 2 步：创建订单                                                                                                                                                            
+                                                                                                                                                                                   
+  GET /delay-order-stock-demo/create                                                                                                                                               
+                                                                                                                                                                                   
+  返回：                                                                                                                                                                           
+                                                                                                                                                                                   
+  {                                                                                                                                                                                
+    "code": 0,                                                                                                                                                                     
+    "message": "订单创建成功，已投递延迟关闭任务",                                                                                                                                 
+    "data": {                                                                                                                                                                      
+      "order_no": "ODS202605041540001234",                                                                                                                                         
+      "status": 1,                                                                                                                                                                 
+      "sku_id": 1001,                                                                                                                                                              
+      "quantity": 2,                                                                                                                                                               
+      "close_after_seconds": 15                                                                                                                                                    
+    }                                                                                                                                                                              
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  这时库存会先从 10 变成 8。                                                                                                                                                       
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ### 第 3 步：等 15 秒                                                                                                                                                            
+                                                                                                                                                                                   
+  终端会看到：                                                                                                                                                                     
+                                                                                                                                                                                   
+  === DelayCloseOrderReleaseStockJob handle ===                                                                                                                                    
+  array(4) {                                                                                                                                                                       
+    ["order_no"]=>                                                                                                                                                                 
+    string(21) "ODS202605041540001234"                                                                                                                                             
+    ["sku_id"]=>                                                                                                                                                                   
+    int(1001)                                                                                                                                                                      
+    ["quantity"]=>                                                                                                                                                                 
+    int(2)                                                                                                                                                                         
+    ["execute_time"]=>                                                                                                                                                             
+    string(19) "2026-05-04 15:40:15"                                                                                                                                               
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  订单超时关闭成功，并已回补库存                                                                                                                                                   
+  array(5) {                                                                                                                                                                       
+    ["order_no"]=>                                                                                                                                                                 
+    string(21) "ODS202605041540001234"                                                                                                                                             
+    ["order_status"]=>                                                                                                                                                             
+    int(3)                                                                                                                                                                         
+    ["sku_id"]=>                                                                                                                                                                   
+    int(1001)                                                                                                                                                                      
+    ["restore_quantity"]=>                                                                                                                                                         
+    int(2)                                                                                                                                                                         
+    ["left_stock"]=>                                                                                                                                                               
+    int(10)                                                                                                                                                                        
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ### 第 4 步：再查库存                                                                                                                                                            
+                                                                                                                                                                                   
+  GET /delay-order-stock-demo/inventory?sku_id=1001                                                                                                                                
+                                                                                                                                                                                   
+  库存又回到 10。                                                                                                                                                                  
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ### 第 5 步：查日志                                                                                                                                                              
+                                                                                                                                                                                   
+  GET /delay-order-stock-demo/logs?order_no=ODS202605041540001234                                                                                                                  
+                                                                                                                                                                                   
+  会看到类似：                                                                                                                                                                     
+                                                                                                                                                                                   
+  [                                                                                                                                                                                
+    {                                                                                                                                                                              
+      "order_no": "ODS202605041540001234",                                                                                                                                         
+      "content": "创建订单成功并预扣库存，sku_id=1001，quantity=2"                                                                                                                 
+    },                                                                                                                                                                             
+    {                                                                                                                                                                              
+      "order_no": "ODS202605041540001234",                                                                                                                                         
+      "content": "订单超时关闭，系统回补库存成功，sku_id=1001，quantity=2"                                                                                                         
+    }                                                                                                                                                                              
+  ]                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 场景 2：先支付，不回补库存                                                                                                                                                    
+                                                                                                                                                                                   
+  ### 第 1 步：创建订单                                                                                                                                                            
+                                                                                                                                                                                   
+  GET /delay-order-stock-demo/create                                                                                                                                               
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ### 第 2 步：15 秒内支付                                                                                                                                                         
+                                                                                                                                                                                   
+  GET /delay-order-stock-demo/pay?order_no=ODS202605041541001234                                                                                                                   
+                                                                                                                                                                                   
+  返回：                                                                                                                                                                           
+                                                                                                                                                                                   
+  {                                                                                                                                                                                
+    "code": 0,                                                                                                                                                                     
+    "message": "支付成功",                                                                                                                                                         
+    "data": {                                                                                                                                                                      
+      "order_no": "ODS202605041541001234",                                                                                                                                         
+      "status": 2                                                                                                                                                                  
+    }                                                                                                                                                                              
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ### 第 3 步：等延迟任务执行                                                                                                                                                      
+                                                                                                                                                                                   
+  终端会看到：                                                                                                                                                                     
+                                                                                                                                                                                   
+  === DelayCloseOrderReleaseStockJob handle ===                                                                                                                                    
+  array(4) {                                                                                                                                                                       
+    ["order_no"]=>                                                                                                                                                                 
+    string(21) "ODS202605041541001234"                                                                                                                                             
+    ["sku_id"]=>                                                                                                                                                                   
+    int(1001)                                                                                                                                                                      
+    ["quantity"]=>                                                                                                                                                                 
+    int(2)                                                                                                                                                                         
+    ["execute_time"]=>                                                                                                                                                             
+    string(19) "2026-05-04 15:41:15"                                                                                                                                               
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  订单不是待支付状态，跳过关闭和回补库存                                                                                                                                           
+  array(2) {                                                                                                                                                                       
+    ["order_no"]=>                                                                                                                                                                 
+    string(21) "ODS202605041541001234"                                                                                                                                             
+    ["status"]=>                                                                                                                                                                   
+    int(2)                                                                                                                                                                         
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  说明：                                                                                                                                                                           
+                                                                                                                                                                                   
+  - 已支付订单不会被误关闭                                                                                                                                                         
+  - 也不会误回补库存                                                                                                                                                               
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 八、这个升级版 demo 的企业重点                                                                                                                                                 
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 1）关闭订单和回补库存必须放在一个事务里                                                                                                                                       
+                                                                                                                                                                                   
+  因为这是一个一致性动作：                                                                                                                                                         
+                                                                                                                                                                                   
+  - 订单关闭成功                                                                                                                                                                   
+  - 库存也必须回补成功                                                                                                                                                             
+                                                                                                                                                                                   
+  不能一个成功一个失败。                                                                                                                                                           
+                                                                                                                                                                                   
+  所以 Job 里用了：                                                                                                                                                                
+                                                                                                                                                                                   
+  Db::transaction(function () {                                                                                                                                                    
+      ...                                                                                                                                                                          
+  });                                                                                                                                                                              
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 2）必须 lockForUpdate                                                                                                                                                         
+                                                                                                                                                                                   
+  因为这里涉及并发更新：                                                                                                                                                           
+                                                                                                                                                                                   
+  - 支付流程可能改订单状态                                                                                                                                                         
+  - 延迟任务可能改订单状态                                                                                                                                                         
+  - 库存也可能被其他流程操作                                                                                                                                                       
+                                                                                                                                                                                   
+  所以订单和库存都加锁更稳。                                                                                                                                                       
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 3）只有待支付订单才允许关闭并回补库存                                                                                                                                         
+                                                                                                                                                                                   
+  关键判断：                                                                                                                                                                       
+                                                                                                                                                                                   
+  if ((int) $order->status !== 1) {                                                                                                                                                
+      return;                                                                                                                                                                      
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  这就是防误关单、防误回补的核心。                                                                                                                                                 
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 4）日志一定要记                                                                                                                                                               
+                                                                                                                                                                                   
+  企业里后期排查非常依赖日志：                                                                                                                                                     
+                                                                                                                                                                                   
+  - 为什么订单被关了                                                                                                                                                               
+  - 为什么库存变了                                                                                                                                                                 
+  - 是支付成功还是超时关闭导致的                                                                                                                                                   
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 九、企业版还能怎么继续增强                                                                                                                                                     
+                                                                                                                                                                                   
+  如果你后面想再升级，可以继续加：                                                                                                                                                 
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 1）订单明细表                                                                                                                                                                 
+                                                                                                                                                                                   
+  把 sku_id / quantity 从订单主表拆到明细表。                                                                                                                                      
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 2）库存流水表                                                                                                                                                                 
+                                                                                                                                                                                   
+  记录：                                                                                                                                                                           
+                                                                                                                                                                                   
+  - 扣减                                                                                                                                                                           
+  - 回补                                                                                                                                                                           
+  - 调整来源                                                                                                                                                                       
+  - 操作人 / 系统来源                                                                                                                                                              
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 3）幂等保护                                                                                                                                                                   
+                                                                                                                                                                                   
+  防止同一个延迟任务重复回补库存。                                                                                                                                                 
+                                                                                                                                                                                   
+  比如：                                                                                                                                                                           
+                                                                                                                                                                                   
+  - Redis 幂等 key                                                                                                                                                                 
+  - 日志表唯一约束                                                                                                                                                                 
+  - 订单状态条件更新                                                                                                                                                               
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 4）条件更新写法优化                                                                                                                                                           
+                                                                                                                                                                                   
+  企业里更推荐：                                                                                                                                                                   
+                                                                                                                                                                                   
+  DemoDelayOrder::query()                                                                                                                                                          
+      ->where('order_no', $this->orderNo)                                                                                                                                          
+      ->where('status', 1)                                                                                                                                                         
+      ->update(['status' => 3]);                                                                                                                                                   
+                                                                                                                                                                                   
+  避免重复处理。                                                                                                                                                                   
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 十、一句话总结                                                                                                                                                                 
+                                                                                                                                                                                   
+  这个升级版 demo 的核心是：                                                                                                                                                       
+                                                                                                                                                                                   
+  > 订单超时关闭不是只改订单状态，还要把“库存回补、日志记录、一致性控制”一起做好。
