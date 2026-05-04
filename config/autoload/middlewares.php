@@ -15,7 +15,7 @@ return [
     // http 对应 config/autoload/server.php 内每个 server 的 name 属性对应的值，该配置仅应用在该 Server 中
     'http' => [
         // 数组内配置您的全局中间件，顺序根据该数组的顺序
-        \App\Middleware\RequestLifecycleDemoMiddleware::class,
+        \App\Middleware\RequestLifecycleLogMiddleware::class,
 
     ],
 ];
