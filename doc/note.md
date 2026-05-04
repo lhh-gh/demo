@@ -19804,3 +19804,650 @@ class OrderTransactionDemoService
   3. 延迟队列 demo                                                                                                                                                                 
   4. 幂等消费 demo                                                                                                                                                                 
   5. 队列 + 订单业务完整 demo
+
+
+# 一、失败重试 demo                                                                                                                                                              
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 1）Job：app/Job/RetryOrderNotifyJob.php                                                                                                                                       
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  namespace App\Job;                                                                                                                                                               
+                                                                                                                                                                                   
+  use Hyperf\AsyncQueue\Job;                                                                                                                                                       
+                                                                                                                                                                                   
+  class RetryOrderNotifyJob extends Job                                                                                                                                            
+  {                                                                                                                                                                                
+      /**                                                                                                                                                                          
+       * 最大重试次数                                                                                                                                                              
+       */                                                                                                                                                                          
+      protected int $maxAttempts = 3;                                                                                                                                              
+                                                                                                                                                                                   
+      public function __construct(                                                                                                                                                 
+          public string $orderNo                                                                                                                                                   
+      ) {                                                                                                                                                                          
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 执行任务                                                                                                                                                                  
+       */                                                                                                                                                                          
+      public function handle(): void                                                                                                                                               
+      {                                                                                                                                                                            
+          var_dump('=== RetryOrderNotifyJob handle ===');                                                                                                                          
+          var_dump([                                                                                                                                                               
+              'order_no' => $this->orderNo,                                                                                                                                        
+              'attempts' => $this->attempts(),                                                                                                                                     
+          ]);                                                                                                                                                                      
+                                                                                                                                                                                   
+          // 模拟消费失败                                                                                                                                                          
+          throw new \RuntimeException('模拟通知第三方失败');                                                                                                                       
+      }                                                                                                                                                                            
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 2）Service：app/Service/RetryQueueDemoService.php                                                                                                                             
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  namespace App\Service;                                                                                                                                                           
+                                                                                                                                                                                   
+  use App\Job\RetryOrderNotifyJob;                                                                                                                                                 
+  use Hyperf\AsyncQueue\Driver\DriverFactory;                                                                                                                                      
+                                                                                                                                                                                   
+  class RetryQueueDemoService                                                                                                                                                      
+  {                                                                                                                                                                                
+      public function __construct(                                                                                                                                                 
+          protected DriverFactory $driverFactory                                                                                                                                   
+      ) {                                                                                                                                                                          
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      public function pushRetryJob(): array                                                                                                                                        
+      {                                                                                                                                                                            
+          $orderNo = 'RT' . date('YmdHis') . mt_rand(1000, 9999);                                                                                                                  
+                                                                                                                                                                                   
+          $driver = $this->driverFactory->get('default');                                                                                                                          
+          $driver->push(new RetryOrderNotifyJob($orderNo));                                                                                                                        
+                                                                                                                                                                                   
+          return [                                                                                                                                                                 
+              'code' => 0,                                                                                                                                                         
+              'message' => '失败重试任务已投递',                                                                                                                                   
+              'data' => [                                                                                                                                                          
+                  'order_no' => $orderNo,                                                                                                                                          
+              ],                                                                                                                                                                   
+          ];                                                                                                                                                                       
+      }                                                                                                                                                                            
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 3）Controller：app/Controller/RetryQueueDemoController.php                                                                                                                    
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  namespace App\Controller;                                                                                                                                                        
+                                                                                                                                                                                   
+  use App\Service\RetryQueueDemoService;                                                                                                                                           
+  use Hyperf\HttpServer\Annotation\Controller;                                                                                                                                     
+  use Hyperf\HttpServer\Annotation\GetMapping;                                                                                                                                     
+                                                                                                                                                                                   
+  #[Controller(prefix: 'queue-retry-demo')]                                                                                                                                        
+  class RetryQueueDemoController                                                                                                                                                   
+  {                                                                                                                                                                                
+      public function __construct(                                                                                                                                                 
+          protected RetryQueueDemoService $service                                                                                                                                 
+      ) {                                                                                                                                                                          
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      #[GetMapping('push')]                                                                                                                                                        
+      public function push(): array                                                                                                                                                
+      {                                                                                                                                                                            
+          return $this->service->pushRetryJob();                                                                                                                                   
+      }                                                                                                                                                                            
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 4）你会看到什么                                                                                                                                                               
+                                                                                                                                                                                   
+  请求：                                                                                                                                                                           
+                                                                                                                                                                                   
+  GET /queue-retry-demo/push                                                                                                                                                       
+                                                                                                                                                                                   
+  终端会多次执行：                                                                                                                                                                 
+                                                                                                                                                                                   
+  === RetryOrderNotifyJob handle ===                                                                                                                                               
+  array(2) {                                                                                                                                                                       
+    ["order_no"]=>                                                                                                                                                                 
+    string(20) "RT202605041500001234"                                                                                                                                              
+    ["attempts"]=>                                                                                                                                                                 
+    int(1)                                                                                                                                                                         
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  然后重试第 2 次、第 3 次。                                                                                                                                                       
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 5）这个 demo 学什么                                                                                                                                                           
+                                                                                                                                                                                   
+  - maxAttempts = 3                                                                                                                                                                
+  - 抛异常后会自动重试                                                                                                                                                             
+  - 适合理解失败重试机制                                                                                                                                                           
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 二、延迟队列 demo                                                                                                                                                              
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 1）Job：app/Job/DelayCloseOrderJob.php                                                                                                                                        
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  namespace App\Job;                                                                                                                                                               
+                                                                                                                                                                                   
+  use Hyperf\AsyncQueue\Job;                                                                                                                                                       
+                                                                                                                                                                                   
+  class DelayCloseOrderJob extends Job                                                                                                                                             
+  {                                                                                                                                                                                
+      public function __construct(                                                                                                                                                 
+          public string $orderNo                                                                                                                                                   
+      ) {                                                                                                                                                                          
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      public function handle(): void                                                                                                                                               
+      {                                                                                                                                                                            
+          var_dump('=== DelayCloseOrderJob handle ===');                                                                                                                           
+          var_dump([                                                                                                                                                               
+              'order_no' => $this->orderNo,                                                                                                                                        
+              'message' => '延迟关闭订单执行成功',                                                                                                                                 
+              'execute_time' => date('Y-m-d H:i:s'),                                                                                                                               
+          ]);                                                                                                                                                                      
+      }                                                                                                                                                                            
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 2）Service：app/Service/DelayQueueDemoService.php                                                                                                                             
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  namespace App\Service;                                                                                                                                                           
+                                                                                                                                                                                   
+  use App\Job\DelayCloseOrderJob;                                                                                                                                                  
+  use Hyperf\AsyncQueue\Driver\DriverFactory;                                                                                                                                      
+                                                                                                                                                                                   
+  class DelayQueueDemoService                                                                                                                                                      
+  {                                                                                                                                                                                
+      public function __construct(                                                                                                                                                 
+          protected DriverFactory $driverFactory                                                                                                                                   
+      ) {                                                                                                                                                                          
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      public function pushDelayJob(): array                                                                                                                                        
+      {                                                                                                                                                                            
+          $orderNo = 'DL' . date('YmdHis') . mt_rand(1000, 9999);                                                                                                                  
+                                                                                                                                                                                   
+          $driver = $this->driverFactory->get('default');                                                                                                                          
+                                                                                                                                                                                   
+          // 延迟 10 秒执行                                                                                                                                                        
+          $driver->delay(10, new DelayCloseOrderJob($orderNo));                                                                                                                    
+                                                                                                                                                                                   
+          return [                                                                                                                                                                 
+              'code' => 0,                                                                                                                                                         
+              'message' => '延迟任务已投递，10 秒后执行',                                                                                                                          
+              'data' => [                                                                                                                                                          
+                  'order_no' => $orderNo,                                                                                                                                          
+                  'delay_seconds' => 10,                                                                                                                                           
+                  'push_time' => date('Y-m-d H:i:s'),                                                                                                                              
+              ],                                                                                                                                                                   
+          ];                                                                                                                                                                       
+      }                                                                                                                                                                            
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 3）Controller：app/Controller/DelayQueueDemoController.php                                                                                                                    
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  namespace App\Controller;                                                                                                                                                        
+                                                                                                                                                                                   
+  use App\Service\DelayQueueDemoService;                                                                                                                                           
+  use Hyperf\HttpServer\Annotation\Controller;                                                                                                                                     
+  use Hyperf\HttpServer\Annotation\GetMapping;                                                                                                                                     
+                                                                                                                                                                                   
+  #[Controller(prefix: 'queue-delay-demo')]                                                                                                                                        
+  class DelayQueueDemoController                                                                                                                                                   
+  {                                                                                                                                                                                
+      public function __construct(                                                                                                                                                 
+          protected DelayQueueDemoService $service                                                                                                                                 
+      ) {                                                                                                                                                                          
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      #[GetMapping('push')]                                                                                                                                                        
+      public function push(): array                                                                                                                                                
+      {                                                                                                                                                                            
+          return $this->service->pushDelayJob();                                                                                                                                   
+      }                                                                                                                                                                            
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 4）你会看到什么                                                                                                                                                               
+                                                                                                                                                                                   
+  请求：                                                                                                                                                                           
+                                                                                                                                                                                   
+  GET /queue-delay-demo/push                                                                                                                                                       
+                                                                                                                                                                                   
+  接口立即返回：                                                                                                                                                                   
+                                                                                                                                                                                   
+  {                                                                                                                                                                                
+    "code": 0,                                                                                                                                                                     
+    "message": "延迟任务已投递，10 秒后执行",                                                                                                                                      
+    "data": {                                                                                                                                                                      
+      "order_no": "DL202605041505001234",                                                                                                                                          
+      "delay_seconds": 10,                                                                                                                                                         
+      "push_time": "2026-05-04 15:05:00"                                                                                                                                           
+    }                                                                                                                                                                              
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  约 10 秒后终端输出：                                                                                                                                                             
+                                                                                                                                                                                   
+  === DelayCloseOrderJob handle ===                                                                                                                                                
+  array(3) {                                                                                                                                                                       
+    ["order_no"]=>                                                                                                                                                                 
+    string(20) "DL202605041505001234"                                                                                                                                              
+    ["message"]=>                                                                                                                                                                  
+    string(30) "延迟关闭订单执行成功"                                                                                                                                              
+    ["execute_time"]=>                                                                                                                                                             
+    string(19) "2026-05-04 15:05:10"                                                                                                                                               
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 5）这个 demo 学什么                                                                                                                                                           
+                                                                                                                                                                                   
+  - 延迟任务不是立刻消费                                                                                                                                                           
+  - 常见用于：                                                                                                                                                                     
+      - 超时关闭订单                                                                                                                                                               
+      - 延迟通知                                                                                                                                                                   
+      - 延迟补偿                                                                                                                                                                   
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 三、幂等消费 demo                                                                                                                                                              
+                                                                                                                                                                                   
+  这个最接近企业开发重点。                                                                                                                                                         
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 1）Job：app/Job/IdempotentCouponJob.php                                                                                                                                       
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  namespace App\Job;                                                                                                                                                               
+                                                                                                                                                                                   
+  use App\Service\RedisService;                                                                                                                                                    
+  use Hyperf\AsyncQueue\Job;                                                                                                                                                       
+  use Hyperf\Context\ApplicationContext;                                                                                                                                           
+                                                                                                                                                                                   
+  class IdempotentCouponJob extends Job                                                                                                                                            
+  {                                                                                                                                                                                
+      protected int $maxAttempts = 2;                                                                                                                                              
+                                                                                                                                                                                   
+      public function __construct(                                                                                                                                                 
+          public int $userId,                                                                                                                                                      
+          public string $requestId                                                                                                                                                 
+      ) {                                                                                                                                                                          
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      public function handle(): void                                                                                                                                               
+      {                                                                                                                                                                            
+          /** @var RedisService $redisService */                                                                                                                                   
+          $redisService = ApplicationContext::getContainer()->get(RedisService::class);                                                                                            
+          $redis = $redisService->getClient();                                                                                                                                     
+                                                                                                                                                                                   
+          $key = "queue:idempotent:coupon:{$this->userId}:{$this->requestId}";                                                                                                     
+                                                                                                                                                                                   
+          // 幂等校验：只有第一次能成功 set nx                                                                                                                                     
+          $ok = $redis->set($key, 1, ['nx', 'ex' => 3600]);                                                                                                                        
+                                                                                                                                                                                   
+          if (! $ok) {                                                                                                                                                             
+              var_dump('=== IdempotentCouponJob duplicate ===');                                                                                                                   
+              var_dump([                                                                                                                                                           
+                  'user_id' => $this->userId,                                                                                                                                      
+                  'request_id' => $this->requestId,                                                                                                                                
+                  'message' => '重复消费，直接跳过',                                                                                                                               
+              ]);                                                                                                                                                                  
+              return;                                                                                                                                                              
+          }                                                                                                                                                                        
+                                                                                                                                                                                   
+          // 模拟发券逻辑                                                                                                                                                          
+          var_dump('=== IdempotentCouponJob handle ===');                                                                                                                          
+          var_dump([                                                                                                                                                               
+              'user_id' => $this->userId,                                                                                                                                          
+              'request_id' => $this->requestId,                                                                                                                                    
+              'message' => '发券成功（模拟）',                                                                                                                                     
+          ]);                                                                                                                                                                      
+      }                                                                                                                                                                            
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 2）Service：app/Service/IdempotentQueueDemoService.php                                                                                                                        
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  namespace App\Service;                                                                                                                                                           
+                                                                                                                                                                                   
+  use App\Job\IdempotentCouponJob;                                                                                                                                                 
+  use Hyperf\AsyncQueue\Driver\DriverFactory;                                                                                                                                      
+                                                                                                                                                                                   
+  class IdempotentQueueDemoService                                                                                                                                                 
+  {                                                                                                                                                                                
+      public function __construct(                                                                                                                                                 
+          protected DriverFactory $driverFactory                                                                                                                                   
+      ) {                                                                                                                                                                          
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      public function pushIdempotentJob(): array                                                                                                                                   
+      {                                                                                                                                                                            
+          $userId = 1001;                                                                                                                                                          
+                                                                                                                                                                                   
+          // 故意固定 request_id，方便你测试重复消费                                                                                                                               
+          $requestId = 'req-demo-001';                                                                                                                                             
+                                                                                                                                                                                   
+          $driver = $this->driverFactory->get('default');                                                                                                                          
+                                                                                                                                                                                   
+          // 连续 push 两次同一个任务                                                                                                                                              
+          $driver->push(new IdempotentCouponJob($userId, $requestId));                                                                                                             
+          $driver->push(new IdempotentCouponJob($userId, $requestId));                                                                                                             
+                                                                                                                                                                                   
+          return [                                                                                                                                                                 
+              'code' => 0,                                                                                                                                                         
+              'message' => '幂等消费测试任务已投递两次',                                                                                                                           
+              'data' => [                                                                                                                                                          
+                  'user_id' => $userId,                                                                                                                                            
+                  'request_id' => $requestId,                                                                                                                                      
+              ],                                                                                                                                                                   
+          ];                                                                                                                                                                       
+      }                                                                                                                                                                            
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 3）Controller：app/Controller/IdempotentQueueDemoController.php                                                                                                               
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  namespace App\Controller;                                                                                                                                                        
+                                                                                                                                                                                   
+  use App\Service\IdempotentQueueDemoService;                                                                                                                                      
+  use Hyperf\HttpServer\Annotation\Controller;                                                                                                                                     
+  use Hyperf\HttpServer\Annotation\GetMapping;                                                                                                                                     
+                                                                                                                                                                                   
+  #[Controller(prefix: 'queue-idempotent-demo')]                                                                                                                                   
+  class IdempotentQueueDemoController                                                                                                                                              
+  {                                                                                                                                                                                
+      public function __construct(                                                                                                                                                 
+          protected IdempotentQueueDemoService $service                                                                                                                            
+      ) {                                                                                                                                                                          
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      #[GetMapping('push')]                                                                                                                                                        
+      public function push(): array                                                                                                                                                
+      {                                                                                                                                                                            
+          return $this->service->pushIdempotentJob();                                                                                                                              
+      }                                                                                                                                                                            
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 4）你会看到什么                                                                                                                                                               
+                                                                                                                                                                                   
+  请求：                                                                                                                                                                           
+                                                                                                                                                                                   
+  GET /queue-idempotent-demo/push                                                                                                                                                  
+                                                                                                                                                                                   
+  终端第一次消费：                                                                                                                                                                 
+                                                                                                                                                                                   
+  === IdempotentCouponJob handle ===                                                                                                                                               
+  array(3) {                                                                                                                                                                       
+    ["user_id"]=>                                                                                                                                                                  
+    int(1001)                                                                                                                                                                      
+    ["request_id"]=>                                                                                                                                                               
+    string(12) "req-demo-001"                                                                                                                                                      
+    ["message"]=>                                                                                                                                                                  
+    string(21) "发券成功（模拟）"                                                                                                                                                  
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  第二次消费：                                                                                                                                                                     
+                                                                                                                                                                                   
+  === IdempotentCouponJob duplicate ===                                                                                                                                            
+  array(3) {                                                                                                                                                                       
+    ["user_id"]=>                                                                                                                                                                  
+    int(1001)                                                                                                                                                                      
+    ["request_id"]=>                                                                                                                                                               
+    string(12) "req-demo-001"                                                                                                                                                      
+    ["message"]=>                                                                                                                                                                  
+    string(24) "重复消费，直接跳过"                                                                                                                                                
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 5）这个 demo 学什么                                                                                                                                                           
+                                                                                                                                                                                   
+  - 为什么队列消费必须幂等                                                                                                                                                         
+  - Redis set nx 是最常见轻量幂等方案                                                                                                                                              
+  - 同一任务多次消费，也不会重复发券                                                                                                                                               
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 四、你怎么练这 3 个 demo                                                                                                                                                       
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 1. 先练失败重试                                                                                                                                                               
+  - 重试次数怎么控制                                                                                                                                                               
+  - 失败为什么不能只靠“希望它成功”                                                                                                                                                 
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 2. 再练延迟队列                                                                                                                                                               
+                                                                                                                                                                                   
+  理解：                                                                                                                                                                           
+                                                                                                                                                                                   
+  - 任务为什么不是立刻执行                                                                                                                                                         
+  - 延迟任务适合什么场景                                                                                                                                                           
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  理解：                                                                                                                                                                           
+                                                                                                                                                                                   
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  这 3 个 demo 分别对应企业队列最核心的 3 个能力：                                                                                                                                 
+  - 延迟队列：任务什么时候执行                                                                                                                                                     
+  - 幂等消费：任务重复执行怎么办
+
+
+
+HyPerf 异步队列如果走 RedisDriver，常见会用到这些 Redis 数据类型/结构：                                                                                                          
+                                                                                                                                                                                   
+  ## 1）waiting：List                                                                                                                                                              
+                                                                                                                                                                                   
+  等待消费队列。                                                                                                                                                                   
+                                                                                                                                                                                   
+  - 数据类型：List                                                                                                                                                                 
+  - 作用：存放“马上可消费”的任务                                                                                                                                                   
+  - 特点：先进先出，消费者从这里取任务                                                                                                                                             
+                                                                                                                                                                                   
+  你看到的 Job 序列化串，最终就会先进入这类等待队列。                                                                                                                              
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 2）delayed：ZSet                                                                                                                                                              
+                                                                                                                                                                                   
+  延迟队列。                                                                                                                                                                       
+                                                                                                                                                                                   
+  - 数据类型：Sorted Set                                                                                                                                                           
+  - 作用：存放“未来某个时间点才执行”的任务                                                                                                                                         
+  - score：一般是执行时间戳                                                                                                                                                        
+  - member：Job 序列化内容                                                                                                                                                         
+                                                                                                                                                                                   
+  比如你 push($job, 10)，任务通常先放这里。                                                                                                                                        
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 3）reserved：ZSet                                                                                                                                                             
+                                                                                                                                                                                   
+  处理中/保留中的任务。                                                                                                                                                            
+                                                                                                                                                                                   
+  - 数据类型：Sorted Set                                                                                                                                                           
+  - 作用：消费者取到任务后，先放到这里                                                                                                                                             
+  - score：一般和超时、保留截止时间有关                                                                                                                                            
+                                                                                                                                                                                   
+  这样做是为了防止：                                                                                                                                                               
+                                                                                                                                                                                   
+  - 消费中进程挂掉                                                                                                                                                                 
+  - 任务丢失后无法重试                                                                                                                                                             
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 4）failed：List                                                                                                                                                               
+                                                                                                                                                                                   
+  失败队列。                                                                                                                                                                       
+                                                                                                                                                                                   
+  - 数据类型：List                                                                                                                                                                 
+  - 作用：超过最大重试次数后，进入失败队列                                                                                                                                         
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 5）timeout：List                                                                                                                                                              
+                                                                                                                                                                                   
+  超时队列。                                                                                                                                                                       
+                                                                                                                                                                                   
+  - 数据类型：List                                                                                                                                                                 
+  - 作用：任务处理超时后记录到这里                                                                                                                                                 
+  - 注意：超时不一定代表业务没执行成功，只是框架视角认为它超时了                                                                                                                   
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 二、你可以这样理解整个流转                                                                                                                                                     
+                                                                                                                                                                                   
+  ## 普通任务                                                                                                                                                                      
+                                                                                                                                                                                   
+  push                                                                                                                                                                             
+  -> waiting(List)                                                                                                                                                                 
+  -> 消费者取出                                                                                                                                                                    
+  -> reserved(ZSet)                                                                                                                                                                
+  -> handle 成功                                                                                                                                                                   
+  -> 从 reserved 移除                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 延迟任务                                                                                                                                                                      
+                                                                                                                                                                                   
+  push($job, 10)                                                                                                                                                                   
+  -> delayed(ZSet)                                                                                                                                                                 
+  -> 到时间后搬运到 waiting(List)                                                                                                                                                  
+  -> 消费者消费                                                                                                                                                                    
+                                                                                                                                                                                   
+  ## 失败重试                                                                                                                                                                      
+                                                                                                                                                                                   
+  waiting                                                                                                                                                                          
+  -> reserved                                                                                                                                                                      
+  -> handle 失败                                                                                                                                                                   
+  -> 如果还能重试，重新回 delayed / waiting                                                                                                                                        
+  -> 超过次数进 failed(List)                                                                                                                                                       
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 三、为什么是这些数据结构                                                                                                                                                       
+                                                                                                                                                                                   
+  ## List                                                                                                                                                                          
+                                                                                                                                                                                   
+  适合做“立即消费队列”                                                                                                                                                             
+                                                                                                                                                                                   
+  因为：                                                                                                                                                                           
+                                                                                                                                                                                   
+  - 入队出队快                                                                                                                                                                     
+  - FIFO 模型天然适合消息队列                                                                                                                                                      
+                                                                                                                                                                                   
+  ## ZSet                                                                                                                                                                          
+                                                                                                                                                                                   
+  适合做“延迟/超时管理”                                                                                                                                                            
+                                                                                                                                                                                   
+  因为：                                                                                                                                                                           
+                                                                                                                                                                                   
+  - 可以按时间戳排序                                                                                                                                                               
+  - 很适合：                                                                                                                                                                       
+      - 延迟执行                                                                                                                                                                   
+      - 超时扫描                                                                                                                                                                   
+      - 重试调度                                                                                                                                                                   
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 四、你在 Redis 客户端看到的内容是什么                                                                                                                                          
+                                                                                                                                                                                   
+  你看到这种：                                                                                                                                                                     
+                                                                                                                                                                                   
+  O:28:"Hyperf\AsyncQueue\JobMessage"                                                                                                                                              
+  O:23:"App\Job\SendOrderSmsJob"                                                                                                                                                   
+                                                                                                                                                                                   
+  说明：                                                                                                                                                                           
+                                                                                                                                                                                   
+  - Redis 里存的是 PHP 序列化后的 JobMessage                                                                                                                                       
+  - 外层是 JobMessage                                                                                                                                                              
+  - 里面包着你的真实 Job，比如 SendOrderSmsJob                                                                                                                                     
+                                                                                                                                                                                   
+  也就是说：                                                                                                                                                                       
+                                                                                                                                                                                   
+  - Redis 结构 是 List/ZSet                                                                                                                                                        
+  - 元素内容 是 序列化字符串                                                                                                                                                       
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 五、企业里怎么看这些 key                                                                                                                                                       
+                                                                                                                                                                                   
+  你可以在 Redis 里看：                                                                                                                                                            
+                                                                                                                                                                                   
+  keys *                                                                                                                                                                           
+                                                                                                                                                                                   
+  通常会看到和 channel/queue 名相关的一批 key。                                                                                                                                    
+  比如可能带：                                                                                                                                                                     
+                                                                                                                                                                                   
+  - waiting                                                                                                                                                                        
+  - delayed                                                                                                                                                                        
+  - reserved                                                                                                                                                                       
+  - failed                                                                                                                                                                         
+  - timeout                                                                                                                                                                        
+                                                                                                                                                                                   
+  具体 key 前缀和命名，和你配置的 channel 有关。                                                                                                                                   
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 六、最重要的一句话                                                                                                                                                             
+                                                                                                                                                                                   
+  > Hyperf Redis 异步队列，本质上就是：                                                                                                                                            
+  > List 做立即队列，ZSet 做延迟/超时/保留队列，元素内容是序列化后的 Job 对象。
