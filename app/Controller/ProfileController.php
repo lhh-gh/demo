@@ -8,17 +8,22 @@ use Hyperf\HttpServer\Annotation\Controller;
 use Hyperf\HttpServer\Annotation\GetMapping;
 use Hyperf\HttpServer\Annotation\PostMapping;
 use Hyperf\HttpServer\Contract\RequestInterface;
-#[Controller(prefix: "profile")]
+
+#[Controller(prefix: 'profile')]
 class ProfileController
 {
+    /**
+     * 注入 Service
+     */
     #[Inject]
     protected ProfileService $profileService;
 
+    /**
+     * 注入请求对象
+     */
     #[Inject]
     protected RequestInterface $request;
-    /**
-     * 获取会员资料
-     */
+
     /**
      * 获取会员详情
      */
@@ -33,17 +38,12 @@ class ProfileController
     /**
      * 修改会员昵称
      */
-    #[PostMapping(path: "update-nickname")]
+    #[PostMapping(path: 'update-nickname')]
     public function updateNickname()
     {
-        $id = (int) $this->request->input('id');
-        $nickname = (string)$this->request->input('nickname');
+        $id = (int) $this->request->input('id', 0);
+        $nickname = (string) $this->request->input('nickname', '');
 
-        $result = $this->profileService->updateNickname($id, $nickname);
-
-        return [
-            'code' => $result ? 0 : 1,
-            'message' => $result ? '更新成功' : '更新失败',
-        ];
+        return $this->profileService->updateNickname($id, $nickname);
     }
 }

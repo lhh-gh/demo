@@ -22637,3 +22637,465 @@ HyPerf 异步队列如果走 RedisDriver，常见会用到这些 Redis 数据类
                                                                                                                                                                                    
   > #[Crontab(...)] 只是“定义规则”，                                                                                                                                               
   > CrontabDispatcherProcess 才是“真正调度执行定时任务的进程”。
+
+
+
+# Hyperf 会员模块缓存治理 demo                                                                                                                                                   
+                                                                                                                                                                                   
+  ## 一、分层结构                                                                                                                                                                  
+                                                                                                                                                                                   
+  Controller -> Service -> Repository -> Model                                                                                                                                     
+                                                                                                                                                                                   
+  对应命名：                                                                                                                                                                       
+                                                                                                                                                                                   
+  ProfileController                                                                                                                                                                
+  ProfileService                                                                                                                                                                   
+  MemberRepository                                                                                                                                                                 
+  Member                                                                                                                                                                           
+                                                                                                                                                                                   
+  表：                                                                                                                                                                             
+                                                                                                                                                                                   
+  members                                                                                                                                                                          
+                                                                                                                                                                                   
+  缓存 key：                                                                                                                                                                       
+                                                                                                                                                                                   
+  member:profile:{id}                                                                                                                                                              
+                                                                                                                                                                                   
+  锁 key：                                                                                                                                                                         
+                                                                                                                                                                                   
+  lock:member:profile:{id}                                                                                                                                                         
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 二、Model                                                                                                                                                                     
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  namespace App\Model;                                                                                                                                                             
+                                                                                                                                                                                   
+  use Hyperf\DbConnection\Model\Model;                                                                                                                                             
+                                                                                                                                                                                   
+  class Member extends Model                                                                                                                                                       
+  {                                                                                                                                                                                
+      /**                                                                                                                                                                          
+       * 对应数据表                                                                                                                                                                
+       */                                                                                                                                                                          
+      protected ?string $table = 'members';                                                                                                                                        
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 允许批量赋值字段                                                                                                                                                          
+       */                                                                                                                                                                          
+      protected array $fillable = [                                                                                                                                                
+          'nickname',                                                                                                                                                              
+          'email',                                                                                                                                                                 
+          'mobile',                                                                                                                                                                
+          'status',                                                                                                                                                                
+      ];                                                                                                                                                                           
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 三、Repository                                                                                                                                                                
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  namespace App\Repository;                                                                                                                                                        
+                                                                                                                                                                                   
+  use App\Model\Member;                                                                                                                                                            
+  use Hyperf\DbConnection\Db;                                                                                                                                                      
+  use Hyperf\Di\Annotation\Inject;                                                                                                                                                 
+  use Hyperf\Redis\Redis;                                                                                                                                                          
+                                                                                                                                                                                   
+  class MemberRepository                                                                                                                                                           
+  {                                                                                                                                                                                
+      /**                                                                                                                                                                          
+       * 注入 Redis                                                                                                                                                                
+       */                                                                                                                                                                          
+      #[Inject]                                                                                                                                                                    
+      protected Redis $redis;                                                                                                                                                      
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 会员详情缓存 key                                                                                                                                                          
+       */                                                                                                                                                                          
+      protected function getCacheKey(int $id): string                                                                                                                              
+      {                                                                                                                                                                            
+          return "member:profile:{$id}";                                                                                                                                           
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 分布式锁 key                                                                                                                                                              
+       */                                                                                                                                                                          
+      protected function getLockKey(int $id): string                                                                                                                               
+      {                                                                                                                                                                            
+          return "lock:member:profile:{$id}";                                                                                                                                      
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 查询会员详情                                                                                                                                                              
+       *                                                                                                                                                                           
+       * 包含：                                                                                                                                                                    
+       * 1. 缓存穿透保护                                                                                                                                                           
+       * 2. 缓存击穿保护                                                                                                                                                           
+       * 3. 缓存雪崩保护                                                                                                                                                           
+       */                                                                                                                                                                          
+      public function findByIdWithCacheProtect(int $id): ?array                                                                                                                    
+      {                                                                                                                                                                            
+          $cacheKey = $this->getCacheKey($id);                                                                                                                                     
+          $lockKey = $this->getLockKey($id);                                                                                                                                       
+                                                                                                                                                                                   
+          // 1. 先查缓存                                                                                                                                                           
+          $cached = $this->redis->get($cacheKey);                                                                                                                                  
+          if ($cached !== false && $cached !== null) {                                                                                                                             
+              if ($cached === 'null') {                                                                                                                                            
+                  return null;                                                                                                                                                     
+              }                                                                                                                                                                    
+                                                                                                                                                                                   
+              return json_decode($cached, true);                                                                                                                                   
+          }                                                                                                                                                                        
+                                                                                                                                                                                   
+          // 2. 尝试加锁，防止热点 key 击穿                                                                                                                                        
+          $locked = $this->redis->set($lockKey, '1', ['nx', 'ex' => 5]);                                                                                                           
+                                                                                                                                                                                   
+          // 3. 没抢到锁，短暂等待后重试缓存                                                                                                                                       
+          if (! $locked) {                                                                                                                                                         
+              usleep(50000);                                                                                                                                                       
+                                                                                                                                                                                   
+              $retryCached = $this->redis->get($cacheKey);                                                                                                                         
+              if ($retryCached !== false && $retryCached !== null) {                                                                                                               
+                  if ($retryCached === 'null') {                                                                                                                                   
+                      return null;                                                                                                                                                 
+                  }                                                                                                                                                                
+                                                                                                                                                                                   
+                  return json_decode($retryCached, true);                                                                                                                          
+              }                                                                                                                                                                    
+                                                                                                                                                                                   
+              return null;                                                                                                                                                         
+          }                                                                                                                                                                        
+                                                                                                                                                                                   
+          try {                                                                                                                                                                    
+              // 4. 双重检查缓存                                                                                                                                                   
+              $cachedAgain = $this->redis->get($cacheKey);                                                                                                                         
+              if ($cachedAgain !== false && $cachedAgain !== null) {                                                                                                               
+                  if ($cachedAgain === 'null') {                                                                                                                                   
+                      return null;                                                                                                                                                 
+                  }                                                                                                                                                                
+                                                                                                                                                                                   
+                  return json_decode($cachedAgain, true);                                                                                                                          
+              }                                                                                                                                                                    
+                                                                                                                                                                                   
+              // 5. 查数据库                                                                                                                                                       
+              $member = Member::query()->find($id);                                                                                                                                
+                                                                                                                                                                                   
+              // 6. 防缓存穿透：不存在数据也缓存空值                                                                                                                               
+              if (! $member) {                                                                                                                                                     
+                  $this->redis->setex($cacheKey, 60, 'null');                                                                                                                      
+                  return null;                                                                                                                                                     
+              }                                                                                                                                                                    
+                                                                                                                                                                                   
+              $data = $member->toArray();                                                                                                                                          
+                                                                                                                                                                                   
+              // 7. 防缓存雪崩：TTL 加随机值                                                                                                                                       
+              $ttl = 3600 + random_int(1, 300);                                                                                                                                    
+                                                                                                                                                                                   
+              $this->redis->setex(                                                                                                                                                 
+                  $cacheKey,                                                                                                                                                       
+                  $ttl,                                                                                                                                                            
+                  json_encode($data, JSON_UNESCAPED_UNICODE)                                                                                                                       
+              );                                                                                                                                                                   
+                                                                                                                                                                                   
+              return $data;                                                                                                                                                        
+          } finally {                                                                                                                                                              
+              // 8. 释放锁                                                                                                                                                         
+              $this->redis->del($lockKey);                                                                                                                                         
+          }                                                                                                                                                                        
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 更新会员昵称                                                                                                                                                              
+       *                                                                                                                                                                           
+       * 使用延迟双删策略：                                                                                                                                                        
+       * 1. 先删缓存                                                                                                                                                               
+       * 2. 再更新数据库                                                                                                                                                           
+       * 3. 延迟一段时间再删一次缓存                                                                                                                                               
+       */                                                                                                                                                                          
+      public function updateNicknameWithDelayedDoubleDelete(int $id, string $nickname): bool                                                                                       
+      {                                                                                                                                                                            
+          $cacheKey = $this->getCacheKey($id);                                                                                                                                     
+                                                                                                                                                                                   
+          // 第一次删除缓存                                                                                                                                                        
+          $this->redis->del($cacheKey);                                                                                                                                            
+                                                                                                                                                                                   
+          Db::beginTransaction();                                                                                                                                                  
+                                                                                                                                                                                   
+          try {                                                                                                                                                                    
+              $member = Member::query()->find($id);                                                                                                                                
+              if (! $member) {                                                                                                                                                     
+                  Db::rollBack();                                                                                                                                                  
+                  return false;                                                                                                                                                    
+              }                                                                                                                                                                    
+                                                                                                                                                                                   
+              $member->nickname = $nickname;                                                                                                                                       
+              $member->save();                                                                                                                                                     
+                                                                                                                                                                                   
+              Db::commit();                                                                                                                                                        
+          } catch (\Throwable $throwable) {                                                                                                                                        
+              Db::rollBack();                                                                                                                                                      
+              throw $throwable;                                                                                                                                                    
+          }                                                                                                                                                                        
+                                                                                                                                                                                   
+          // 延迟后第二次删除缓存                                                                                                                                                  
+          usleep(200000);                                                                                                                                                          
+          $this->redis->del($cacheKey);                                                                                                                                            
+                                                                                                                                                                                   
+          return true;                                                                                                                                                             
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 普通更新方案                                                                                                                                                              
+       *                                                                                                                                                                           
+       * 先更新 MySQL                                                                                                                                                              
+       * 再删除 Redis                                                                                                                                                              
+       */                                                                                                                                                                          
+      public function updateByIdAndClearCache(int $id, array $data): bool                                                                                                          
+      {                                                                                                                                                                            
+          Db::beginTransaction();                                                                                                                                                  
+                                                                                                                                                                                   
+          try {                                                                                                                                                                    
+              $member = Member::query()->find($id);                                                                                                                                
+              if (! $member) {                                                                                                                                                     
+                  Db::rollBack();                                                                                                                                                  
+                  return false;                                                                                                                                                    
+              }                                                                                                                                                                    
+                                                                                                                                                                                   
+              $member->fill($data);                                                                                                                                                
+              $member->save();                                                                                                                                                     
+                                                                                                                                                                                   
+              $this->redis->del($this->getCacheKey($id));                                                                                                                          
+                                                                                                                                                                                   
+              Db::commit();                                                                                                                                                        
+              return true;                                                                                                                                                         
+          } catch (\Throwable $throwable) {                                                                                                                                        
+              Db::rollBack();                                                                                                                                                      
+              throw $throwable;                                                                                                                                                    
+          }                                                                                                                                                                        
+      }                                                                                                                                                                            
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 四、Service                                                                                                                                                                   
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  namespace App\Service;                                                                                                                                                           
+                                                                                                                                                                                   
+  use App\Repository\MemberRepository;                                                                                                                                             
+  use Hyperf\Di\Annotation\Inject;                                                                                                                                                 
+                                                                                                                                                                                   
+  class ProfileService                                                                                                                                                             
+  {                                                                                                                                                                                
+      /**                                                                                                                                                                          
+       * 注入仓储层                                                                                                                                                                
+       */                                                                                                                                                                          
+      #[Inject]                                                                                                                                                                    
+      protected MemberRepository $memberRepository;                                                                                                                                
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 获取会员详情                                                                                                                                                              
+       */                                                                                                                                                                          
+      public function getDetail(int $id): array                                                                                                                                    
+      {                                                                                                                                                                            
+          if ($id <= 0) {                                                                                                                                                          
+              return [                                                                                                                                                             
+                  'code' => 1,                                                                                                                                                     
+                  'message' => '会员ID不合法',                                                                                                                                     
+              ];                                                                                                                                                                   
+          }                                                                                                                                                                        
+                                                                                                                                                                                   
+          $member = $this->memberRepository->findByIdWithCacheProtect($id);                                                                                                        
+                                                                                                                                                                                   
+          if (! $member) {                                                                                                                                                         
+              return [                                                                                                                                                             
+                  'code' => 404,                                                                                                                                                   
+                  'message' => '会员不存在',                                                                                                                                       
+              ];                                                                                                                                                                   
+          }                                                                                                                                                                        
+                                                                                                                                                                                   
+          return [                                                                                                                                                                 
+              'code' => 0,                                                                                                                                                         
+              'message' => 'success',                                                                                                                                              
+              'data' => $member,                                                                                                                                                   
+          ];                                                                                                                                                                       
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 修改会员昵称                                                                                                                                                              
+       */                                                                                                                                                                          
+      public function updateNickname(int $id, string $nickname): array                                                                                                             
+      {                                                                                                                                                                            
+          if ($id <= 0 || $nickname === '') {                                                                                                                                      
+              return [                                                                                                                                                             
+                  'code' => 1,                                                                                                                                                     
+                  'message' => '参数不合法',                                                                                                                                       
+              ];                                                                                                                                                                   
+          }                                                                                                                                                                        
+                                                                                                                                                                                   
+          $result = $this->memberRepository->updateNicknameWithDelayedDoubleDelete($id, $nickname);                                                                                
+                                                                                                                                                                                   
+          return [                                                                                                                                                                 
+              'code' => $result ? 0 : 1,                                                                                                                                           
+              'message' => $result ? '更新成功' : '更新失败',                                                                                                                      
+          ];                                                                                                                                                                       
+      }                                                                                                                                                                            
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 五、Controller                                                                                                                                                                
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  namespace App\Controller;                                                                                                                                                        
+                                                                                                                                                                                   
+  use App\Service\ProfileService;                                                                                                                                                  
+  use Hyperf\Di\Annotation\Inject;                                                                                                                                                 
+  use Hyperf\HttpServer\Annotation\Controller;                                                                                                                                     
+  use Hyperf\HttpServer\Annotation\GetMapping;                                                                                                                                     
+  use Hyperf\HttpServer\Annotation\PostMapping;                                                                                                                                    
+  use Hyperf\HttpServer\Contract\RequestInterface;                                                                                                                                 
+                                                                                                                                                                                   
+  #[Controller(prefix: 'profile')]                                                                                                                                                 
+  class ProfileController                                                                                                                                                          
+  {                                                                                                                                                                                
+      /**                                                                                                                                                                          
+       * 注入 Service                                                                                                                                                              
+       */                                                                                                                                                                          
+      #[Inject]                                                                                                                                                                    
+      protected ProfileService $profileService;                                                                                                                                    
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 注入请求对象                                                                                                                                                              
+       */                                                                                                                                                                          
+      #[Inject]                                                                                                                                                                    
+      protected RequestInterface $request;                                                                                                                                         
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 获取会员详情                                                                                                                                                              
+       */                                                                                                                                                                          
+      #[GetMapping(path: 'detail')]                                                                                                                                                
+      public function detail()                                                                                                                                                     
+      {                                                                                                                                                                            
+          $id = (int) $this->request->input('id', 0);                                                                                                                              
+                                                                                                                                                                                   
+          return $this->profileService->getDetail($id);                                                                                                                            
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      /**                                                                                                                                                                          
+       * 修改会员昵称                                                                                                                                                              
+       */                                                                                                                                                                          
+      #[PostMapping(path: 'update-nickname')]                                                                                                                                      
+      public function updateNickname()                                                                                                                                             
+      {                                                                                                                                                                            
+          $id = (int) $this->request->input('id', 0);                                                                                                                              
+          $nickname = (string) $this->request->input('nickname', '');                                                                                                              
+                                                                                                                                                                                   
+          return $this->profileService->updateNickname($id, $nickname);                                                                                                            
+      }                                                                                                                                                                            
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 六、SQL                                                                                                                                                                       
+                                                                                                                                                                                   
+  CREATE TABLE `members` (                                                                                                                                                         
+    `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键ID',                                                                                                                 
+    `nickname` VARCHAR(64) NOT NULL DEFAULT '' COMMENT '会员昵称',                                                                                                                 
+    `email` VARCHAR(128) NOT NULL DEFAULT '' COMMENT '邮箱',                                                                                                                       
+    `mobile` VARCHAR(20) NOT NULL DEFAULT '' COMMENT '手机号',                                                                                                                     
+    `status` TINYINT NOT NULL DEFAULT 1 COMMENT '状态：1启用 0禁用',                                                                                                               
+    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',                                                                                                   
+    `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',                                                                       
+    PRIMARY KEY (`id`),                                                                                                                                                            
+    UNIQUE KEY `uk_email` (`email`),                                                                                                                                               
+    KEY `idx_mobile` (`mobile`),                                                                                                                                                   
+    KEY `idx_status` (`status`)                                                                                                                                                    
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='会员表';                                                                                             
+                                                                                                                                                                                   
+  测试数据：                                                                                                                                                                       
+                                                                                                                                                                                   
+  INSERT INTO `members` (`nickname`, `email`, `mobile`, `status`)                                                                                                                  
+  VALUES                                                                                                                                                                           
+  ('张三', 'zhangsan@example.com', '13800000001', 1),                                                                                                                              
+  ('李四', 'lisi@example.com', '13800000002', 1),                                                                                                                                  
+  ('王五', 'wangwu@example.com', '13800000003', 1);                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 七、接口地址                                                                                                                                                                  
+                                                                                                                                                                                   
+  ### 1. 查询会员详情                                                                                                                                                              
+                                                                                                                                                                                   
+  GET /profile/detail?id=1                                                                                                                                                         
+                                                                                                                                                                                   
+  完整示例：                                                                                                                                                                       
+                                                                                                                                                                                   
+  http://127.0.0.1:9501/profile/detail?id=1                                                                                                                                        
+                                                                                                                                                                                   
+  ### 2. 修改会员昵称                                                                                                                                                              
+                                                                                                                                                                                   
+  POST /profile/update-nickname                                                                                                                                                    
+                                                                                                                                                                                   
+  完整示例：                                                                                                                                                                       
+                                                                                                                                                                                   
+  http://127.0.0.1:9501/profile/update-nickname                                                                                                                                    
+                                                                                                                                                                                   
+  JSON 请求体：                                                                                                                                                                    
+                                                                                                                                                                                   
+  {                                                                                                                                                                                
+    "id": 1,                                                                                                                                                                       
+    "nickname": "新昵称"                                                                                                                                                           
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 八、5 个点分别对应哪里                                                                                                                                                        
+                                                                                                                                                                                   
+  ### 1. 穿透                                                                                                                                                                      
+                                                                                                                                                                                   
+  这里：                                                                                                                                                                           
+                                                                                                                                                                                   
+  if (! $member) {                                                                                                                                                                 
+      $this->redis->setex($cacheKey, 60, 'null');                                                                                                                                  
+      return null;                                                                                                                                                                 
+  }                                                                                                                                                                                
+  ### 3. 雪崩                                                                                                                                                                      
+                                                                                                                                                                                   
+  这里：                                                                                                                                                                           
+                                                                                                                                                                                   
+  $ttl = 3600 + random_int(1, 300);                                                                                                                                                
+                                                                                                                                                                                   
+  ### 4. 分布式锁                                                                                                                                                                  
+                                                                                                                                                                                   
+  就是这个 lock key：                                                                                                                                                              
+                                                                                                                                                                                   
+  lock:member:profile:{id}                                                                                                                                                         
+                                                                                                                                                                                   
+  ### 5. 延迟双删                                                                                                                                                                  
+                                                                                                                                                                                   
+  这里：                                                                                                                                                                           
+                                                                                                                                                                                   
+  $this->redis->del($cacheKey);                                                                                                                                                    
+                                                                                                                                                                                   
+  // update mysql                                                                                                                                                                  
+                                                                                                                                                                                   
+  usleep(200000);                                                                                                                                                                  
+  $this->redis->del($cacheKey);                                                                                                                                                    
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 九、一句话理解                                                                                                                                                                
+                                                                                                                                                                                   
+  这套 demo 就是：                                                                                                                                                                 
+                                                                                                                                                                                   
+  - 查数据时：防穿透 + 防击穿 + 防雪崩                                                                                                                                             
+  - 改数据时：延迟双删保证缓存一致性

@@ -10,16 +10,13 @@ use Hyperf\Redis\Redis;
 class MemberRepository
 {
     /**
-     * 注入 Redis 客户端
+     * 注入 Redis
      */
     #[Inject]
     protected Redis $redis;
 
     /**
-     * 获取会员详情缓存 Key
-     *
-     * 例如：
-     * member:profile:1
+     * 会员详情缓存 key
      */
     protected function getCacheKey(int $id): string
     {
@@ -27,103 +24,158 @@ class MemberRepository
     }
 
     /**
-     * 根据会员ID查询会员信息（优先读取缓存）
-     *
-     * 查询流程：
-     * 1. 先查 Redis
-     * 2. Redis 有数据直接返回
-     * 3. Redis 没有数据则查 MySQL
-     * 4. MySQL 查到数据后回写 Redis
-     * 5. 如果数据库也没有，则缓存空值，防止缓存穿透
-     *
-     * @param int $id 会员ID
-     * @return array|null
+     * 分布式锁 key
      */
-    public function findByIdWithCache(int $id): ?array
+    protected function getLockKey(int $id): string
     {
-        // 生成缓存 Key
+        return "lock:member:profile:{$id}";
+    }
+
+    /**
+     * 查询会员详情
+     *
+     * 包含：
+     * 1. 缓存穿透保护
+     * 2. 缓存击穿保护
+     * 3. 缓存雪崩保护
+     */
+    public function findByIdWithCacheProtect(int $id): ?array
+    {
         $cacheKey = $this->getCacheKey($id);
+        $lockKey = $this->getLockKey($id);
 
-        // 先从 Redis 中获取缓存数据
+        // 1. 先查缓存
         $cached = $this->redis->get($cacheKey);
-
-        // 如果缓存存在，直接返回
         if ($cached !== false && $cached !== null) {
-            // 如果缓存的是字符串 null，表示数据库中没有该会员
             if ($cached === 'null') {
                 return null;
             }
 
-            // 将 JSON 字符串转换为数组后返回
             return json_decode($cached, true);
         }
 
-        // Redis 中没有数据，则查询 MySQL
-        $member = Member::query()->find($id);
+        // 2. 尝试加锁，防止热点 key 击穿
+        $locked = $this->redis->set($lockKey, '1', ['nx', 'ex' => 5]);
 
-        // 如果数据库中也没有该会员，缓存空值，避免缓存穿透
-        if (! $member) {
-            $this->redis->setex($cacheKey, 60, 'null');
+        // 3. 没抢到锁，短暂等待后重试缓存
+        if (! $locked) {
+            usleep(50000);
+
+            $retryCached = $this->redis->get($cacheKey);
+            if ($retryCached !== false && $retryCached !== null) {
+                if ($retryCached === 'null') {
+                    return null;
+                }
+
+                return json_decode($retryCached, true);
+            }
+
             return null;
         }
 
-        // 将模型对象转换为数组
-        $data = $member->toArray();
+        try {
+            // 4. 双重检查缓存
+            $cachedAgain = $this->redis->get($cacheKey);
+            if ($cachedAgain !== false && $cachedAgain !== null) {
+                if ($cachedAgain === 'null') {
+                    return null;
+                }
 
-        // 把数据库中的结果写入 Redis，缓存 3600 秒
-        $this->redis->setex(
-            $cacheKey,
-            3600,
-            json_encode($data, JSON_UNESCAPED_UNICODE)
-        );
+                return json_decode($cachedAgain, true);
+            }
 
-        // 返回会员数据
-        return $data;
+            // 5. 查数据库
+            $member = Member::query()->find($id);
+
+            // 6. 防缓存穿透：不存在数据也缓存空值
+            if (! $member) {
+                $this->redis->setex($cacheKey, 60, 'null');
+                return null;
+            }
+
+            $data = $member->toArray();
+
+            // 7. 防缓存雪崩：TTL 加随机值
+            $ttl = 3600 + random_int(1, 300);
+
+            $this->redis->setex(
+                $cacheKey,
+                $ttl,
+                json_encode($data, JSON_UNESCAPED_UNICODE)
+            );
+
+            return $data;
+        } finally {
+            // 8. 释放锁
+            $this->redis->del($lockKey);
+        }
     }
 
     /**
-     * 根据会员ID更新会员信息，并删除对应缓存
+     * 更新会员昵称
      *
-     * 缓存一致性策略：
-     * 1. 先更新 MySQL
-     * 2. 再删除 Redis 缓存
-     *
-     * 这样可以保证下次读取时重新从数据库加载最新数据
-     *
-     * @param int $id 会员ID
-     * @param array $data 需要更新的数据
-     * @return bool
-     * @throws \Throwable
+     * 使用延迟双删策略：
+     * 1. 先删缓存
+     * 2. 再更新数据库
+     * 3. 延迟一段时间再删一次缓存
      */
-    public function updateByIdAndClearCache(int $id, array $data): bool
+    public function updateNicknameWithDelayedDoubleDelete(int $id, string $nickname): bool
     {
-        // 开启数据库事务
+        $cacheKey = $this->getCacheKey($id);
+
+        // 第一次删除缓存
+        $this->redis->del($cacheKey);
+
         Db::beginTransaction();
 
         try {
-            // 查询会员是否存在
             $member = Member::query()->find($id);
-
-            // 如果会员不存在，则回滚事务并返回失败
             if (! $member) {
                 Db::rollBack();
                 return false;
             }
 
-            // 填充更新数据
-            $member->fill($data);
-
-            // 保存到数据库
+            $member->nickname = $nickname;
             $member->save();
 
-            // 删除对应缓存，保证缓存和数据库最终一致
+            Db::commit();
+        } catch (\Throwable $throwable) {
+            Db::rollBack();
+            throw $throwable;
+        }
+
+        // 延迟后第二次删除缓存
+        usleep(200000);
+        $this->redis->del($cacheKey);
+
+        return true;
+    }
+
+    /**
+     * 普通更新方案
+     *
+     * 先更新 MySQL
+     * 再删除 Redis
+     */
+    public function updateByIdAndClearCache(int $id, array $data): bool
+    {
+        Db::beginTransaction();
+
+        try {
+            $member = Member::query()->find($id);
+            if (! $member) {
+                Db::rollBack();
+                return false;
+            }
+
+            $member->fill($data);
+            $member->save();
+
             $this->redis->del($this->getCacheKey($id));
 
-            // 提交事务
             Db::commit();
             return true;
         } catch (\Throwable $throwable) {
-            // 发生异常时回滚事务
             Db::rollBack();
             throw $throwable;
         }

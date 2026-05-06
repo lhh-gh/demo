@@ -7,22 +7,25 @@ use Hyperf\Di\Annotation\Inject;
 
 class ProfileService
 {
+    /**
+     * 注入仓储层
+     */
     #[Inject]
     protected MemberRepository $memberRepository;
 
     /**
-     * 获取会员资料
+     * 获取会员详情
      */
     public function getDetail(int $id): array
     {
         if ($id <= 0) {
             return [
                 'code' => 1,
-                'message' => '参数错误',
+                'message' => '会员ID不合法',
             ];
         }
 
-        $member = $this->memberRepository->findByIdWithCache($id);
+        $member = $this->memberRepository->findByIdWithCacheProtect($id);
 
         if (! $member) {
             return [
@@ -41,14 +44,20 @@ class ProfileService
     /**
      * 修改会员昵称
      */
-    public function updateNickname(int $id, string $nickname): bool
+    public function updateNickname(int $id, string $nickname): array
     {
         if ($id <= 0 || $nickname === '') {
-            return false;
+            return [
+                'code' => 1,
+                'message' => '参数不合法',
+            ];
         }
 
-        return $this->memberRepository->updateByIdAndClearCache($id, [
-            'nickname' => $nickname,
-        ]);
+        $result = $this->memberRepository->updateNicknameWithDelayedDoubleDelete($id, $nickname);
+
+        return [
+            'code' => $result ? 0 : 1,
+            'message' => $result ? '更新成功' : '更新失败',
+        ];
     }
 }
