@@ -21828,3 +21828,812 @@ HyPerf 异步队列如果走 RedisDriver，常见会用到这些 Redis 数据类
   这个升级版 demo 的核心是：                                                                                                                                                       
                                                                                                                                                                                    
   > 订单超时关闭不是只改订单状态，还要把“库存回补、日志记录、一致性控制”一起做好。
+
+
+
+
+我先用最容易理解、最贴近企业的场景：                                                                                                                                             
+                                                                                                                                                                                   
+  > 每 10 秒执行一次任务，扫描并打印一条日志                                                                                                                                       
+  > 后面你可以很容易扩展成：                                                                                                                                                       
+                                                                                                                                                                                   
+  - 定时关闭订单                                                                                                                                                                   
+  - 定时补偿失败任务                                                                                                                                                               
+  - 定时同步第三方状态                                                                                                                                                             
+  - 定时清理缓存                                                                                                                                                                   
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 一、先理解 Hyperf 定时任务是干什么的                                                                                                                                           
+                                                                                                                                                                                   
+  定时任务就是：                                                                                                                                                                   
+                                                                                                                                                                                   
+  按照固定时间规则自动执行一段代码                                                                                                                                                 
+                                                                                                                                                                                   
+  比如：                                                                                                                                                                           
+                                                                                                                                                                                   
+  - 每 10 秒执行一次                                                                                                                                                               
+  - 每分钟执行一次                                                                                                                                                                 
+  - 每天凌晨 2 点执行一次                                                                                                                                                          
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 二、Hyperf 定时任务常见组成                                                                                                                                                    
+                                                                                                                                                                                   
+  一般有两种核心写法：                                                                                                                                                             
+                                                                                                                                                                                   
+  1. Crontab 配置类                                                                                                                                                                
+  2. 具体任务执行类 / 回调                                                                                                                                                         
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 三、最简单 Demo                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 1）安装组件                                                                                                                                                                   
+                                                                                                                                                                                   
+  如果项目还没装：                                                                                                                                                                 
+                                                                                                                                                                                   
+  composer require hyperf/crontab                                                                                                                                                  
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 2）配置文件                                                                                                                                                                   
+                                                                                                                                                                                   
+  文件：config/autoload/crontab.php                                                                                                                                                
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  return [                                                                                                                                                                         
+      'enable' => true,                                                                                                                                                            
+  ];                                                                                                                                                                               
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 3）定时任务类                                                                                                                                                                 
+                                                                                                                                                                                   
+  文件：app/Crontab/DemoCrontab.php                                                                                                                                                
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  namespace App\Crontab;                                                                                                                                                           
+                                                                                                                                                                                   
+  use Hyperf\Crontab\Annotation\Crontab;                                                                                                                                           
+                                                                                                                                                                                   
+  #[Crontab(                                                                                                                                                                       
+      rule: '*/10 * * * * *',                                                                                                                                                      
+      name: 'DemoCrontab',                                                                                                                                                         
+      callback: 'execute',                                                                                                                                                         
+      memo: '每 10 秒执行一次 Demo 定时任务'                                                                                                                                       
+  )]                                                                                                                                                                               
+  class DemoCrontab                                                                                                                                                                
+  {                                                                                                                                                                                
+      public function execute(): void                                                                                                                                              
+      {                                                                                                                                                                            
+          var_dump('=== DemoCrontab execute ===');                                                                                                                                 
+          var_dump([                                                                                                                                                               
+              'time' => date('Y-m-d H:i:s'),                                                                                                                                       
+              'message' => '定时任务执行成功',                                                                                                                                     
+          ]);                                                                                                                                                                      
+      }                                                                                                                                                                            
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 四、这个 cron 表达式是什么意思                                                                                                                                                 
+                                                                                                                                                                                   
+  rule: '*/10 * * * * *'                                                                                                                                                           
+                                                                                                                                                                                   
+  这是 6 位 cron，在 Hyperf / Swoole 场景下常见支持秒级。                                                                                                                          
+                                                                                                                                                                                   
+  含义：                                                                                                                                                                           
+                                                                                                                                                                                   
+  每 10 秒执行一次                                                                                                                                                                 
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 五、启动后你会看到什么                                                                                                                                                         
+                                                                                                                                                                                   
+  启动：                                                                                                                                                                           
+                                                                                                                                                                                   
+  php bin/hyperf.php start                                                                                                                                                         
+                                                                                                                                                                                   
+  终端大概每 10 秒打印一次：                                                                                                                                                       
+                                                                                                                                                                                   
+  === DemoCrontab execute ===                                                                                                                                                      
+  array(2) {                                                                                                                                                                       
+    ["time"]=>                                                                                                                                                                     
+    string(19) "2026-05-05 10:50:10"                                                                                                                                               
+    ["message"]=>                                                                                                                                                                  
+    string(24) "定时任务执行成功"                                                                                                                                                  
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 六、再给你一个更企业一点的 Demo                                                                                                                                                
+                                                                                                                                                                                   
+  场景：                                                                                                                                                                           
+                                                                                                                                                                                   
+  > 每 30 秒扫描一次“失败任务表”，打印待补偿数量                                                                                                                                   
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 1）文件：app/Crontab/RetryFailedJobCrontab.php                                                                                                                                
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  namespace App\Crontab;                                                                                                                                                           
+                                                                                                                                                                                   
+  use Hyperf\Crontab\Annotation\Crontab;                                                                                                                                           
+                                                                                                                                                                                   
+  #[Crontab(                                                                                                                                                                       
+      rule: '*/30 * * * * *',                                                                                                                                                      
+      name: 'RetryFailedJobCrontab',                                                                                                                                               
+      callback: 'execute',                                                                                                                                                         
+      memo: '每 30 秒扫描一次失败任务'                                                                                                                                             
+  )]                                                                                                                                                                               
+  class RetryFailedJobCrontab                                                                                                                                                      
+  {                                                                                                                                                                                
+      public function execute(): void                                                                                                                                              
+      {                                                                                                                                                                            
+          var_dump('=== RetryFailedJobCrontab execute ===');                                                                                                                       
+          var_dump([                                                                                                                                                               
+              'time' => date('Y-m-d H:i:s'),                                                                                                                                       
+              'message' => '扫描失败任务补偿逻辑（模拟）',                                                                                                                         
+          ]);                                                                                                                                                                      
+      }                                                                                                                                                                            
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 七、再给你一个“调用 Service”的企业写法                                                                                                                                         
+                                                                                                                                                                                   
+  企业里通常不建议 Crontab 类里写太多业务。                                                                                                                                        
+  更推荐：                                                                                                                                                                         
+                                                                                                                                                                                   
+  - Crontab 只做调度入口                                                                                                                                                           
+  - 真正业务放到 Service                                                                                                                                                           
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 1）Service：app/Service/CronDemoService.php                                                                                                                                   
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  namespace App\Service;                                                                                                                                                           
+                                                                                                                                                                                   
+  class CronDemoService                                                                                                                                                            
+  {                                                                                                                                                                                
+      public function handle(): void                                                                                                                                               
+      {                                                                                                                                                                            
+          var_dump('=== CronDemoService handle ===');                                                                                                                              
+          var_dump([                                                                                                                                                               
+              'time' => date('Y-m-d H:i:s'),                                                                                                                                       
+              'message' => 'Service 层定时任务逻辑执行成功',                                                                                                                       
+          ]);                                                                                                                                                                      
+      }                                                                                                                                                                            
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 2）Crontab：app/Crontab/CronServiceDemoCrontab.php                                                                                                                            
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  namespace App\Crontab;                                                                                                                                                           
+                                                                                                                                                                                   
+  use App\Service\CronDemoService;                                                                                                                                                 
+  use Hyperf\Crontab\Annotation\Crontab;                                                                                                                                           
+                                                                                                                                                                                   
+  #[Crontab(                                                                                                                                                                       
+      rule: '*/15 * * * * *',                                                                                                                                                      
+      name: 'CronServiceDemoCrontab',                                                                                                                                              
+      callback: 'execute',                                                                                                                                                         
+      memo: '每 15 秒执行一次 Service 版定时任务'                                                                                                                                  
+  )]                                                                                                                                                                               
+  class CronServiceDemoCrontab                                                                                                                                                     
+  {                                                                                                                                                                                
+      public function __construct(                                                                                                                                                 
+          protected CronDemoService $service                                                                                                                                       
+      ) {                                                                                                                                                                          
+      }                                                                                                                                                                            
+                                                                                                                                                                                   
+      public function execute(): void                                                                                                                                              
+      {                                                                                                                                                                            
+          $this->service->handle();                                                                                                                                                
+      }                                                                                                                                                                            
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 八、企业里定时任务常见用途                                                                                                                                                     
+                                                                                                                                                                                   
+  非常多，常见有：                                                                                                                                                                 
+                                                                                                                                                                                   
+  - 扫描超时未支付订单并关闭                                                                                                                                                       
+  - 补偿失败任务                                                                                                                                                                   
+  - 同步第三方支付状态                                                                                                                                                             
+  - 清理过期缓存                                                                                                                                                                   
+  - 统计日报 / 周报                                                                                                                                                                
+  - 定时刷新排行榜                                                                                                                                                                 
+  - 定时同步 IM 抄送数据                                                                                                                                                           
+  - 定时清理临时文件                                                                                                                                                               
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 九、定时任务和队列的区别                                                                                                                                                       
+                                                                                                                                                                                   
+  这个非常重要。                                                                                                                                                                   
+                                                                                                                                                                                   
+  ## 定时任务                                                                                                                                                                      
+                                                                                                                                                                                   
+  适合：                                                                                                                                                                           
+                                                                                                                                                                                   
+  - 固定时间执行                                                                                                                                                                   
+  - 周期扫描                                                                                                                                                                       
+  - 统一补偿                                                                                                                                                                       
+  - 批处理任务                                                                                                                                                                     
+                                                                                                                                                                                   
+  例如：                                                                                                                                                                           
+                                                                                                                                                                                   
+  - 每分钟扫描超时订单                                                                                                                                                             
+  - 每天凌晨跑报表                                                                                                                                                                 
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 异步队列                                                                                                                                                                      
+                                                                                                                                                                                   
+  适合：                                                                                                                                                                           
+                                                                                                                                                                                   
+  - 某个动作触发后立刻异步执行                                                                                                                                                     
+  - 一次请求对应一个异步任务                                                                                                                                                       
+                                                                                                                                                                                   
+  例如：                                                                                                                                                                           
+                                                                                                                                                                                   
+  - 下单后发短信                                                                                                                                                                   
+  - 支付后发通知                                                                                                                                                                   
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 一句话区别                                                                                                                                                                    
+                                                                                                                                                                                   
+  > 定时任务偏“按时间驱动”，异步队列偏“按事件驱动”。                                                                                                                               
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 十、企业开发里怎么学定时任务                                                                                                                                                   
+                                                                                                                                                                                   
+  建议你按这几个 demo 练：                                                                                                                                                         
+                                                                                                                                                                                   
+  1. 最简单日志打印 demo                                                                                                                                                           
+  2. Crontab 调用 Service demo                                                                                                                                                     
+  3. 定时扫描失败任务 demo                                                                                                                                                         
+  4. 定时关闭超时订单 demo                                                                                                                                                         
+  5. 定时补偿第三方状态 demo                                                                                                                                                       
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 十一、常见注意点                                                                                                                                                               
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 1）不要在 Crontab 里堆太多业务代码                                                                                                                                            
+                                                                                                                                                                                   
+  推荐：                                                                                                                                                                           
+                                                                                                                                                                                   
+  例如上一次还没跑完，下一次又来了。                                                                                                                                               
+                                                                                                                                                                                   
+  企业里一般会加：                                                                                                                                                                 
+                                                                                                                                                                                   
+  - 本机锁                                                                                                                                                                         
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 3）注意幂等                                                                                                                                                                   
+                                                                                                                                                                                   
+  比如定时补偿任务，可能会多次扫到同一条数据。                                                                                                                                     
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 4）注意日志                                                                                                                                                                   
+                                                                                                                                                                                   
+  要能知道：                                                                                                                                                                       
+                                                                                                                                                                                   
+  - 什么时间执行了                                                                                                                                                                 
+  - 扫了多少条                                                                                                                                                                     
+  - 成功多少条                                                                                                                                                                     
+  - 失败多少条                                                                                                                                                                     
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 十二、一句话总结                                                                                                                                                               
+                                                                                                                                                                                   
+  你可以先记住：                                                                                                                                                                   
+                                                                                                                                                                                   
+  > Hyperf 定时任务就是用 #[Crontab(...)] 按规则调度代码执行；企业里通常写成 Crontab -> Service。                                                                                  
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  如果你要，我下一步可以继续给你：                                                                                                                                                 
+                                                                                                                                                                                   
+  1. 定时关闭超时订单 demo                                                                                                                                                         
+  2. 定时补偿失败任务 demo                                                                                                                                                         
+  3. 定时任务 + Redis 锁防重入 demo                                                                                                                                                
+  4. 整理成 Markdown 文档并生成文件                                                                                                                                                
+                                                                                                                                                                                   
+                                                                                                                                                                                   
+› === DemoCrontab execute ===                                                                                                                                                      
+    array(2) {                                                                                                                                                                     
+      ["time"]=>                                                                                                                                                                   
+      string(19) "2026-05-05 10:50:10"                                                                                                                                             
+      ["message"]=>                                                                                                                                                                
+      string(24) "定时任务执行成功"                                                                                                                                                
+    }  终端没有出现这个                                                                                                                                                            
+                                                                                                                                                                                   
+                                                                                                                                                                                   
+• 这说明：                                                                                                                                                                         
+                                                                                                                                                                                   
+  > 定时任务类没有被调度起来，不是 execute() 代码本身的问题。                                                                                                                      
+                                                                                                                                                                                   
+  你这个场景里，常见原因就 4 个。                                                                                                                                                  
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 一、先给结论                                                                                                                                                                   
+                                                                                                                                                                                   
+  如果终端没有出现：                                                                                                                                                               
+                                                                                                                                                                                   
+  === DemoCrontab execute ===                                                                                                                                                      
+                                                                                                                                                                                   
+  优先检查：                                                                                                                                                                       
+                                                                                                                                                                                   
+  1. 有没有安装 hyperf/crontab                                                                                                                                                     
+  2. 有没有 config/autoload/crontab.php                                                                                                                                            
+  3. 定时任务类目录 / 命名空间是否正确                                                                                                                                             
+  4. 服务是否重启了                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 二、最常见排查顺序                                                                                                                                                             
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 1）先确认组件装了没有                                                                                                                                                         
+                                                                                                                                                                                   
+  执行：                                                                                                                                                                           
+                                                                                                                                                                                   
+  composer show | findstr crontab                                                                                                                                                  
+                                                                                                                                                                                   
+  应该能看到类似：                                                                                                                                                                 
+                                                                                                                                                                                   
+  hyperf/crontab                                                                                                                                                                   
+                                                                                                                                                                                   
+  如果没有，先装：                                                                                                                                                                 
+                                                                                                                                                                                   
+  composer require hyperf/crontab                                                                                                                                                  
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 2）确认配置文件存在                                                                                                                                                           
+                                                                                                                                                                                   
+  文件：                                                                                                                                                                           
+                                                                                                                                                                                   
+  config/autoload/crontab.php                                                                                                                                                      
+                                                                                                                                                                                   
+  内容最少要有：                                                                                                                                                                   
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  return [                                                                                                                                                                         
+      'enable' => true,                                                                                                                                                            
+  ];                                                                                                                                                                               
+                                                                                                                                                                                   
+  如果没有这个文件，定时任务不会启用。                                                                                                                                             
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 3）确认类路径和命名空间对不对                                                                                                                                                 
+                                                                                                                                                                                   
+  你的文件应该在：                                                                                                                                                                 
+                                                                                                                                                                                   
+  app/Crontab/DemoCrontab.php                                                                                                                                                      
+                                                                                                                                                                                   
+  代码应该类似：                                                                                                                                                                   
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  namespace App\Crontab;                                                                                                                                                           
+                                                                                                                                                                                   
+  use Hyperf\Crontab\Annotation\Crontab;                                                                                                                                           
+                                                                                                                                                                                   
+  #[Crontab(                                                                                                                                                                       
+      rule: '*/10 * * * * *',                                                                                                                                                      
+      name: 'DemoCrontab',                                                                                                                                                         
+      callback: 'execute',                                                                                                                                                         
+      memo: '每 10 秒执行一次 Demo 定时任务'                                                                                                                                       
+  )]                                                                                                                                                                               
+  class DemoCrontab                                                                                                                                                                
+  {                                                                                                                                                                                
+      public function execute(): void                                                                                                                                              
+      {                                                                                                                                                                            
+          var_dump('=== DemoCrontab execute ===');                                                                                                                                 
+          var_dump([                                                                                                                                                               
+              'time' => date('Y-m-d H:i:s'),                                                                                                                                       
+              'message' => '定时任务执行成功',                                                                                                                                     
+          ]);                                                                                                                                                                      
+      }                                                                                                                                                                            
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  重点看：                                                                                                                                                                         
+                                                                                                                                                                                   
+  - 目录是不是 app/Crontab                                                                                                                                                         
+  - 命名空间是不是 App\Crontab                                                                                                                                                     
+  - callback: 'execute' 方法名是否存在                                                                                                                                             
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 4）改完后必须重启，不是只刷新                                                                                                                                                 
+                                                                                                                                                                                   
+  一定要：                                                                                                                                                                         
+                                                                                                                                                                                   
+  php bin/hyperf.php stop                                                                                                                                                          
+  php bin/hyperf.php start                                                                                                                                                         
+                                                                                                                                                                                   
+  不要只改文件后继续看旧进程。                                                                                                                                                     
+                                                                                                                                                                                   
+  因为 Hyperf 是常驻内存。                                                                                                                                                         
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 三、还有一个很关键的点：你的项目里可能没有 app/Crontab                                                                                                                         
+                                                                                                                                                                                   
+  你前面这个工作区里，已经有：                                                                                                                                                     
+                                                                                                                                                                                   
+  - app/Controller                                                                                                                                                                 
+  - app/Service                                                                                                                                                                    
+  - app/Middleware                                                                                                                                                                 
+  - app/Listener                                                                                                                                                                   
+                                                                                                                                                                                   
+  但未确认你真的创建了：                                                                                                                                                           
+                                                                                                                                                                                   
+  app/Crontab/DemoCrontab.php                                                                                                                                                      
+                                                                                                                                                                                   
+  如果文件没创建，当然不会执行。                                                                                                                                                   
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 四、再给你一个“最稳测试版”                                                                                                                                                     
+                                                                                                                                                                                   
+  你先建这个最小可跑版：                                                                                                                                                           
+                                                                                                                                                                                   
+  ## config/autoload/crontab.php                                                                                                                                                   
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  return [                                                                                                                                                                         
+      'enable' => true,                                                                                                                                                            
+  ];                                                                                                                                                                               
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## app/Crontab/DemoCrontab.php                                                                                                                                                   
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  namespace App\Crontab;                                                                                                                                                           
+                                                                                                                                                                                   
+  use Hyperf\Crontab\Annotation\Crontab;                                                                                                                                           
+                                                                                                                                                                                   
+  #[Crontab(                                                                                                                                                                       
+      rule: '*/5 * * * * *',                                                                                                                                                       
+      name: 'DemoCrontab',                                                                                                                                                         
+      callback: 'execute',                                                                                                                                                         
+      memo: '每 5 秒执行一次 Demo 定时任务'                                                                                                                                        
+  )]                                                                                                                                                                               
+  class DemoCrontab                                                                                                                                                                
+  {                                                                                                                                                                                
+      public function execute(): void                                                                                                                                              
+      {                                                                                                                                                                            
+          echo PHP_EOL;                                                                                                                                                            
+          echo '=== DemoCrontab execute ===' . PHP_EOL;                                                                                                                            
+          print_r([                                                                                                                                                                
+              'time' => date('Y-m-d H:i:s'),                                                                                                                                       
+              'message' => '定时任务执行成功',                                                                                                                                     
+          ]);                                                                                                                                                                      
+      }                                                                                                                                                                            
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  我这里把 var_dump 换成了：                                                                                                                                                       
+                                                                                                                                                                                   
+  - echo                                                                                                                                                                           
+  - print_r                                                                                                                                                                        
+                                                                                                                                                                                   
+  因为有时候终端里这样更直观。                                                                                                                                                     
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 五、启动后你应该观察什么                                                                                                                                                       
+                                                                                                                                                                                   
+  启动：                                                                                                                                                                           
+                                                                                                                                                                                   
+  php bin/hyperf.php start                                                                                                                                                         
+                                                                                                                                                                                   
+  然后至少等 5~10 秒。                                                                                                                                                             
+                                                                                                                                                                                   
+  正常应该会周期输出：                                                                                                                                                             
+                                                                                                                                                                                   
+  === DemoCrontab execute ===                                                                                                                                                      
+  Array                                                                                                                                                                            
+  (                                                                                                                                                                                
+      [time] => 2026-05-05 11:00:05                                                                                                                                                
+      [message] => 定时任务执行成功                                                                                                                                                
+  )                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 六、如果还是没有输出，再看这两个点                                                                                                                                             
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 1）注解扫描是否正常                                                                                                                                                           
+                                                                                                                                                                                   
+  因为 #[Crontab(...)] 依赖类被扫描到。                                                                                                                                            
+                                                                                                                                                                                   
+  如果你项目基础注解机制正常，一般没问题。                                                                                                                                         
+  但如果项目特殊配置过扫描路径，可能 app/Crontab 没被扫到。                                                                                                                        
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 2）日志里是否出现 crontab 相关启动信息                                                                                                                                        
+                                                                                                                                                                                   
+  有些版本不会很明显打印，但如果完全没加载，通常说明组件或配置没生效。                                                                                                             
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 七、最可能的真实原因                                                                                                                                                           
+                                                                                                                                                                                   
+  按你前面的情况，我判断最可能是：                                                                                                                                                 
+                                                                                                                                                                                   
+  ## 情况 A                                                                                                                                                                        
+                                                                                                                                                                                   
+  你还没真的创建 config/autoload/crontab.php                                                                                                                                       
+                                                                                                                                                                                   
+  或                                                                                                                                                                               
+                                                                                                                                                                                   
+  ## 情况 B                                                                                                                                                                        
+                                                                                                                                                                                   
+  你还没真的创建 app/Crontab/DemoCrontab.php                                                                                                                                       
+                                                                                                                                                                                   
+  或                                                                                                                                                                               
+                                                                                                                                                                                   
+  ## 情况 C                                                                                                                                                                        
+                                                                                                                                                                                   
+  创建了，但没重启服务                                                                                                                                                             
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 八、你现在最快的处理方式                                                                                                                                                       
+                                                                                                                                                                                   
+  你先核对这 3 个文件/步骤：                                                                                                                                                       
+                                                                                                                                                                                   
+  ### 1.                                                                                                                                                                           
+                                                                                                                                                                                   
+  有没有：                                                                                                                                                                         
+                                                                                                                                                                                   
+  config/autoload/crontab.php                                                                                                                                                      
+                                                                                                                                                                                   
+  ### 2.                                                                                                                                                                           
+                                                                                                                                                                                   
+  有没有：                                                                                                                                                                         
+                                                                                                                                                                                   
+  app/Crontab/DemoCrontab.php                                                                                                                                                      
+                                                                                                                                                                                   
+  ### 3.                                                                                                                                                                           
+                                                                                                                                                                                   
+  有没有执行：                                                                                                                                                                     
+                                                                                                                                                                                   
+  php bin/hyperf.php stop                                                                                                                                                          
+  php bin/hyperf.php start                                                                                                                                                         
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 九、我可以直接帮你继续做                                                                                                                                                       
+                                                                                                                                                                                   
+  如果你要，我下一条可以直接帮你：                                                                                                                                                 
+                                                                                                                                                                                   
+  1. 生成 config/autoload/crontab.php                                                                                                                                              
+  2. 生成 app/Crontab/DemoCrontab.php                                                                                                                                              
+  3. 顺手生成一份《Hyfef 定时任务完整 Demo 文档》                                                                                                                                  
+                                                                                                                                                                                   
+  你只要回复一句：                                                                                                                                                                 
+                                                                                                                                                                                   
+  > 生成                                                                                                                                                                           
+                                                                                                                                                                                   
+  我就直接给你落文件版。                                                                                                                                                           
+                                                                                                                                                                                   
+                                                                                                                                                                                   
+› 缺少在onfig/autoload/processes.php:13，加入：                                                                                                                                    
+                                                                                                                                                                                   
+    Hyperf\Crontab\Process\CrontabDispatcherProcess::class,                                                                                                                        
+                                                                                                                                                                                   
+    现在文件里同时有队列消费进程和定时任务调度进程：                                                                                                                               
+                                                                                                                                                                                   
+    return [                                                                                                                                                                       
+        Hyperf\AsyncQueue\Process\ConsumerProcess::class,                                                                                                                          
+        Hyperf\Crontab\Process\CrontabDispatcherProcess::class,                                                                                                                    
+    ];这样                                                                                                                                                                         
+                                                                                                                                                                                   
+                                                                                                                                                                                   
+• 对，就是这个意思。                                                                                                                                                               
+  你这个项目里，定时任务不生效的关键原因，就是没有把 CrontabDispatcherProcess 注册到 processes.php。                                                                               
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 一、正确写法                                                                                                                                                                   
+                                                                                                                                                                                   
+  文件：                                                                                                                                                                           
+                                                                                                                                                                                   
+  config/autoload/processes.php                                                                                                                                                    
+                                                                                                                                                                                   
+  内容可以这样：                                                                                                                                                                   
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  return [                                                                                                                                                                         
+      Hyperf\AsyncQueue\Process\ConsumerProcess::class,                                                                                                                            
+      Hyperf\Crontab\Process\CrontabDispatcherProcess::class,                                                                                                                      
+  ];                                                                                                                                                                               
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 二、这两个进程分别干什么                                                                                                                                                       
+                                                                                                                                                                                   
+  ## 1）队列消费进程                                                                                                                                                               
+                                                                                                                                                                                   
+  Hyperf\AsyncQueue\Process\ConsumerProcess::class                                                                                                                                 
+                                                                                                                                                                                   
+  作用：                                                                                                                                                                           
+                                                                                                                                                                                   
+  - 消费异步队列里的 Job                                                                                                                                                           
+  - 执行 handle()                                                                                                                                                                  
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 2）定时任务调度进程                                                                                                                                                           
+                                                                                                                                                                                   
+  Hyperf\Crontab\Process\CrontabDispatcherProcess::class                                                                                                                           
+                                                                                                                                                                                   
+  作用：                                                                                                                                                                           
+                                                                                                                                                                                   
+  - 扫描并调度 #[Crontab(...)]                                                                                                                                                     
+  - 按 cron 规则触发定时任务执行                                                                                                                                                   
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 三、为什么必须加这个                                                                                                                                                           
+                                                                                                                                                                                   
+  因为：                                                                                                                                                                           
+                                                                                                                                                                                   
+  - 你写了 #[Crontab(...)]                                                                                                                                                         
+  - 只是定义了定时任务规则                                                                                                                                                         
+  - 真正负责“按时间触发执行”的，是 CrontabDispatcherProcess 进程                                                                                                                   
+                                                                                                                                                                                   
+  没有这个进程，就相当于：                                                                                                                                                         
+                                                                                                                                                                                   
+  - 你写了闹钟规则                                                                                                                                                                 
+  - 但没有“闹钟程序”在跑                                                                                                                                                           
+                                                                                                                                                                                   
+  所以终端当然不会出现：                                                                                                                                                           
+                                                                                                                                                                                   
+  === DemoCrontab execute ===                                                                                                                                                      
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 四、完整最小配置建议                                                                                                                                                           
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 1）config/autoload/crontab.php                                                                                                                                                
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  return [                                                                                                                                                                         
+      'enable' => true,                                                                                                                                                            
+  ];                                                                                                                                                                               
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 2）config/autoload/processes.php                                                                                                                                              
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  return [                                                                                                                                                                         
+      Hyperf\AsyncQueue\Process\ConsumerProcess::class,                                                                                                                            
+      Hyperf\Crontab\Process\CrontabDispatcherProcess::class,                                                                                                                      
+  ];                                                                                                                                                                               
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  ## 3）app/Crontab/DemoCrontab.php                                                                                                                                                
+                                                                                                                                                                                   
+  <?php                                                                                                                                                                            
+                                                                                                                                                                                   
+  declare(strict_types=1);                                                                                                                                                         
+                                                                                                                                                                                   
+  namespace App\Crontab;                                                                                                                                                           
+                                                                                                                                                                                   
+  use Hyperf\Crontab\Annotation\Crontab;                                                                                                                                           
+                                                                                                                                                                                   
+  #[Crontab(                                                                                                                                                                       
+      rule: '*/5 * * * * *',                                                                                                                                                       
+      name: 'DemoCrontab',                                                                                                                                                         
+      callback: 'execute',                                                                                                                                                         
+      memo: '每 5 秒执行一次 Demo 定时任务'                                                                                                                                        
+  )]                                                                                                                                                                               
+  class DemoCrontab                                                                                                                                                                
+  {                                                                                                                                                                                
+      public function execute(): void                                                                                                                                              
+      {                                                                                                                                                                            
+          echo PHP_EOL;                                                                                                                                                            
+          echo '=== DemoCrontab execute ===' . PHP_EOL;                                                                                                                            
+          print_r([                                                                                                                                                                
+              'time' => date('Y-m-d H:i:s'),                                                                                                                                       
+              'message' => '定时任务执行成功',                                                                                                                                     
+          ]);                                                                                                                                                                      
+      }                                                                                                                                                                            
+  }                                                                                                                                                                                
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 五、改完后要做什么                                                                                                                                                             
+                                                                                                                                                                                   
+  必须重启服务：                                                                                                                                                                   
+                                                                                                                                                                                   
+  php bin/hyperf.php stop                                                                                                                                                          
+  php bin/hyperf.php start                                                                                                                                                         
+                                                                                                                                                                                   
+  然后等 5 秒左右看终端。                                                                                                                                                          
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 六、你现在的理解可以这样记                                                                                                                                                     
+                                                                                                                                                                                   
+  ## 异步队列要运行，靠这个进程：                                                                                                                                                  
+                                                                                                                                                                                   
+  Hyperf\AsyncQueue\Process\ConsumerProcess::class                                                                                                                                 
+                                                                                                                                                                                   
+  ## 定时任务要运行，靠这个进程：                                                                                                                                                  
+                                                                                                                                                                                   
+  Hyperf\Crontab\Process\CrontabDispatcherProcess::class                                                                                                                           
+                                                                                                                                                                                   
+  ———                                                                                                                                                                              
+                                                                                                                                                                                   
+  # 七、一句话总结                                                                                                                                                                 
+                                                                                                                                                                                   
+  > #[Crontab(...)] 只是“定义规则”，                                                                                                                                               
+  > CrontabDispatcherProcess 才是“真正调度执行定时任务的进程”。
